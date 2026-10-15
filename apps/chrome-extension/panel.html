@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; height: 95vh; box-sizing: border-box; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 12px; overflow: auto; }
+    h3 { margin: 0 0 8px 0; font-size: 13px; color: #93c5fd; text-transform: uppercase; letter-spacing: 0.5px; }
+    button { background: #2563eb; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; margin-right: 6px; margin-bottom: 6px; }
+    button.secondary { background: #475569; }
+    button.success { background: #16a34a; }
+    button.danger { background: #dc2626; }
+    input { width: 100%; padding: 6px; background: #0f172a; border: 1px solid #475569; color: #fff; border-radius: 4px; font-family: monospace; box-sizing: border-box; margin-bottom: 8px; }
+    select { width: 100%; padding: 6px; background: #0f172a; border: 1px solid #475569; color: #fff; border-radius: 4px; font-family: monospace; box-sizing: border-box; margin-bottom: 8px; }
+    pre { background: #020617; padding: 8px; border-radius: 4px; overflow-x: auto; font-size: 11px; line-height: 1.4; border: 1px solid #1e293b; }
+    .trace-box { border-left: 3px solid #ef4444; padding-left: 8px; margin-top: 8px; background: rgba(239,68,68,0.08); padding: 8px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <!-- Left Column: Surgical Patch & Diff -->
+  <div class="card">
+    <h3>1. Inspect & Surgical Tailwind/Class Patch</h3>
+    <div>
+      <button id="btn-inspect">Inspect Element</button>
+      <button id="btn-open-front" class="secondary" disabled>Open in Cursor (Frontend)</button>
+      <button id="btn-locate" class="secondary" disabled>Locate in DOM</button>
+      <button id="btn-rollback" class="danger">Rollback Last Patch</button>
+    </div>
+    <div id="identity-meta" style="font-size:12px; margin:8px 0; color:#cbd5e1;">No element selected.</div>
+    <div id="instance-meta" style="font-size:11px; margin:0 0 8px 0; color:#6ee7b7;"></div>
+
+    <label style="font-size:11px; color:#94a3b8;">Surgical ClassName Editor (Live Previews in DOM):</label>
+    <input id="input-classname" placeholder="Select an element with a static className..." disabled />
+
+    <div>
+      <button id="btn-preview-diff" class="secondary" disabled>Stage & Preview Diff</button>
+      <button id="btn-apply-patch" class="success" disabled>Apply Atomic Patch to Disk</button>
+    </div>
+
+    <label style="font-size:11px; color:#94a3b8; margin-top:8px; display:block;">Surgical Text Editor (Live Previews in DOM):</label>
+    <input id="input-text" placeholder="Select an element with static text..." disabled />
+    <div>
+      <button id="btn-preview-text" class="secondary" disabled>Preview Text Diff</button>
+      <button id="btn-apply-text" class="success" disabled>Apply Text Patch</button>
+    </div>
+
+    <label style="font-size:11px; color:#94a3b8; margin-top:8px; display:block;">Static Prop Editor:</label>
+    <select id="select-prop" disabled><option value="">(No static string props)</option></select>
+    <input id="input-prop" placeholder="Select a prop to edit..." disabled />
+    <div>
+      <button id="btn-preview-prop" class="secondary" disabled>Preview Prop Diff</button>
+      <button id="btn-apply-prop" class="success" disabled>Apply Prop Patch</button>
+    </div>
+
+    <h3>Source Snippet & Staged Unified Diff</h3>
+    <pre id="code-preview">// Select an element on the page to view its exact AST source range...</pre>
+
+    <h3>Live React Props & State (Fiber)</h3>
+    <pre id="props-preview">// Inspect an element to see its live runtime props/state...</pre>
+
+    <h3>Enterprise AI Settings (BYOK)</h3>
+    <select id="ai-provider">
+      <option value="gemini">Google Gemini (Default)</option>
+      <option value="openai">OpenAI (GPT-4o)</option>
+      <option value="anthropic">Anthropic Claude</option>
+      <option value="openai-compatible">Custom Gateway / Local (Ollama)</option>
+    </select>
+    <input id="ai-apikey" type="password" placeholder="Enter API Key (BYOK, session-only)..." autocomplete="off" />
+    <input id="ai-model" placeholder="Model override (e.g. gpt-4o, claude-3-5)..." autocomplete="off" />
+    <input id="ai-baseurl" placeholder="Base URL (custom gateway only, e.g. http://127.0.0.1:11434/v1)..." autocomplete="off" />
+
+    <h3>AI Visual Delta & Quick Fixes</h3>
+    <div>
+      <button id="btn-ai-fix" class="secondary" disabled>Generate AI Quick Fix</button>
+      <button id="btn-ai-apply" class="success" disabled>Apply AI Patch</button>
+    </div>
+    <div id="ai-explanation" style="font-size:11px; color:#38bdf8; margin:6px 0;"></div>
+  </div>
+
+  <!-- Right Column: Full-Stack Trace & Cursor AI Context -->
+  <div class="card">
+    <h3>2. Full-Stack X-Ray (UI Click → Network → Backend Crash)</h3>
+    <div>
+      <button id="btn-copy-ai" class="secondary">Copy Full-Stack Bug Bundle for Cursor AI</button>
+    </div>
+    <div id="traces-container" style="font-size:12px; margin-top:8px;">
+      Listening for correlated backend traces on 127.0.0.1:4321...
+    </div>
+  </div>
+
+  <script src="panel.js"></script>
+</body>
+</html>

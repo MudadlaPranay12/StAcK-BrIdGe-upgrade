@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@devbridge/protocol": ["./packages/protocol/src/index.ts"],
+      "@devbridge/backend-tracer": ["./packages/backend-tracer/src/index.ts"],
+      "@devbridge/vite-plugin": ["./plugins/vite-plugin-devbridge/src/index.ts"]
+    }
+  }
+}

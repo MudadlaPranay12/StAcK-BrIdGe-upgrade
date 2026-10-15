@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "DevBridge — Surgical Patch & Full-Stack X-Ray",
+  "version": "1.0.0",
+  "devtools_page": "devtools.html",
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
+  "permissions": ["activeTab", "scripting", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost:*/*", "http://127.0.0.1:*/*"],
+      "js": ["content-script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
