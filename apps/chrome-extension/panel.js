@@ -422,7 +422,23 @@ async function selectIdentity(devId, runtime = null, a11y = []) {
     renderFiberInspector();
     loadComponentTree();
   } catch (err) {
-    inspectorTitle.textContent = `Error: ${err.message}`;
+    // Stale data-dev-id (agent restarted and lost its registry): auto re-sync
+    // the tree and show a one-click recovery message instead of a dead end.
+    if (/IDENTITY_STALE|Identity not found|re-register/i.test(err.message || "")) {
+      inspectorTitle.textContent = "Stale element ID — agent restarted";
+      inspectorFile.textContent = "—";
+      codePreview.textContent = [
+        "⚠️ This element was stamped before the Local Agent last restarted,",
+        "so its ID is no longer in the agent registry.",
+        "",
+        "Recover in 10 seconds:",
+        '  1. Hard-refresh your app page (Ctrl+Shift+R) to re-register components.',
+        '  2. Click "Sync Tree" above (already re-syncing now) and inspect again.',
+      ].join("\n");
+      loadComponentTree();
+    } else {
+      inspectorTitle.textContent = `Error: ${err.message}`;
+    }
   }
 }
 

@@ -70,7 +70,14 @@ app.get('/api/v1/identities', (_req, res) => {
 // 2. Resolve single DevIdentity + surrounding source code + current file hash
 app.get('/api/v1/identity/:id', (req, res) => {
   const record = identityRegistry.get(req.params.id);
-  if (!record) return res.status(404).json({ error: 'Identity not found' });
+  if (!record) {
+    return res.status(404).json({
+      error:
+        'Identity not found — the agent likely restarted and lost its in-memory registry. ' +
+        'Hard-refresh your app page (Ctrl+Shift+R) to re-register components, then click "Sync Tree".',
+      code: 'IDENTITY_STALE',
+    });
+  }
 
   try {
     const { content, hash } = patchEngine.readSourceFile(record.file);
@@ -172,7 +179,14 @@ app.post('/api/v1/ai/fix', async (req, res) => {
     };
     if (!devId) return res.status(400).json({ error: 'Missing devId in request body' });
     const record = identityRegistry.get(devId);
-    if (!record) return res.status(404).json({ error: 'Identity not found in registry' });
+    if (!record) {
+      return res.status(404).json({
+        error:
+          'Identity not found in registry — the agent likely restarted. ' +
+          'Hard-refresh your app page (Ctrl+Shift+R) to re-register components, then click "Sync Tree".',
+        code: 'IDENTITY_STALE',
+      });
+    }
 
     const { content } = patchEngine.readSourceFile(record.file);
     const lines = content.split('\n');
