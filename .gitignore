@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+*.devbridge.tmp
+*.rollback.tmp
+.devbridge/
+.env
+
+backup-before-northstar/

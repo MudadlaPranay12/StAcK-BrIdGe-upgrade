@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DevBridge</title>
+  <style>
+    :root { color-scheme: dark; --bg:#16181d; --surface:#20242b; --surface-2:#292e36; --border:#3a414c; --text:#e7eaf0; --muted:#9ba4b2; --accent:#76a9fa; --good:#62c18b; --warn:#d9a441; --bad:#e57979; --focus:#b8d4ff; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-width:280px; height:100vh; overflow:hidden; background:var(--bg); color:var(--text); font:12px/1.4 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    button,input,select { font:inherit; }
+    button { color:var(--text); background:#303640; border:1px solid #4a5360; border-radius:4px; padding:6px 9px; cursor:pointer; }
+    button:hover:not(:disabled) { background:#3a4350; }
+    button.primary { background:#315d9a; border-color:#5282c4; }
+    button.success { background:#245d47; border-color:#408b69; }
+    button.danger { background:#6b3037; border-color:#a4545d; }
+    button:disabled { cursor:not-allowed; opacity:.48; }
+    button:focus-visible,input:focus-visible,select:focus-visible,[tabindex]:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
+    input,select { width:100%; color:var(--text); background:#171a20; border:1px solid var(--border); border-radius:4px; padding:7px 8px; }
+    .app-header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; border-bottom:1px solid var(--border); background:#1b1e24; }
+    .brand { font-size:13px; font-weight:650; letter-spacing:.01em; }
+    .status { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; color:var(--muted); }
+    .status::before { content:""; width:7px; height:7px; border-radius:50%; background:#79818d; }
+    .status.good { color:var(--good); }.status.good::before { background:var(--good); }.status.bad { color:var(--bad); }.status.bad::before { background:var(--bad); }.status.warn { color:var(--warn); }.status.warn::before { background:var(--warn); }
+    .tabs { display:flex; gap:2px; padding:6px 8px 0; overflow:auto; border-bottom:1px solid var(--border); background:#1b1e24; }
+    .tab { border:0; border-bottom:2px solid transparent; border-radius:0; padding:7px 8px; background:transparent; color:var(--muted); white-space:nowrap; }
+    .tab[aria-selected="true"] { color:var(--text); border-bottom-color:var(--accent); }
+    main { height:calc(100vh - 89px); overflow:auto; padding:10px; }
+    .tab-panel { display:none; }.tab-panel.active { display:block; }
+    .section { margin-bottom:10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); overflow:hidden; }
+    .section > h2,.section > summary { margin:0; padding:8px 10px; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#c5d3e8; border-bottom:1px solid var(--border); }
+    .section-body { padding:10px; }.grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }.stack { display:flex; flex-direction:column; gap:8px; }.row { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }.row > button { flex:1; }.label { color:var(--muted); font-size:11px; }.value { overflow-wrap:anywhere; }.muted { color:var(--muted); }.small { font-size:11px; }.mono,pre,code { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }.mono { overflow-wrap:anywhere; }
+    .metric { min-width:0; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--surface-2); }.metric .label { display:block; margin-bottom:2px; }.metric .value { display:block; }
+    .tree { min-height:100px; max-height:300px; overflow:auto; }.tree-item { display:flex; justify-content:space-between; gap:6px; padding:5px 6px; border-radius:4px; cursor:pointer; }.tree-item:hover,.tree-item.active { background:#333b47; }.tree-children { margin-left:10px; border-left:1px solid var(--border); padding-left:5px; }
+    .inspector { padding:9px; border:1px solid #46566e; border-radius:5px; background:#202b3a; }.inspector strong { color:#cfe0fb; }.pill { display:inline-block; border-radius:999px; padding:2px 6px; border:1px solid var(--border); color:var(--muted); font-size:10px; }
+    pre { white-space:pre-wrap; word-break:break-word; max-height:260px; overflow:auto; margin:0; padding:9px; color:#c7d5e9; background:#15181d; border:1px solid var(--border); border-radius:4px; }
+    .finding { padding:8px; border-left:3px solid var(--warn); background:#302b20; border-radius:3px; }.finding.error { border-left-color:var(--bad); background:#302326; }.finding.good { border-left-color:var(--good); background:#203027; }
+    .check { display:flex; justify-content:space-between; gap:8px; align-items:center; padding:7px 0; border-bottom:1px solid #343a43; }.check:last-child { border-bottom:0; }.state { color:var(--muted); }.state.good { color:var(--good); }.state.bad { color:var(--bad); }.state.warn { color:var(--warn); }
+    .modal { position:fixed; inset:0; display:none; align-items:center; justify-content:center; padding:14px; background:rgba(10,12,15,.84); z-index:4; }.modal.open { display:flex; }.modal-card { width:min(390px,100%); max-height:100%; overflow:auto; padding:12px; border:1px solid var(--border); border-radius:6px; background:var(--surface); box-shadow:0 8px 30px rgba(0,0,0,.35); }.modal-card h2 { margin:0 0 8px; font-size:13px; }.field { display:flex; flex-direction:column; gap:4px; margin-top:8px; }.notice { padding:7px 8px; border-radius:4px; background:#292d35; color:var(--muted); }.error-text { color:var(--bad); }.success-text { color:var(--good); }
+  </style>
+</head>
+<body>
+  <header class="app-header"><div class="brand">DevBridge</div><span id="agent-status" class="status bad" role="status" aria-live="polite">Agent not configured</span></header>
+  <nav class="tabs" role="tablist" aria-label="DevBridge sections">
+    <button class="tab" role="tab" aria-selected="true" aria-controls="overview-panel" data-tab="overview">Overview</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="inspector-panel" data-tab="inspector">Inspector</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="diagnostics-panel" data-tab="diagnostics">Diagnostics</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="changes-panel" data-tab="changes">Changes</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="ai-panel" data-tab="ai">AI</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="settings-panel" data-tab="settings">Settings</button>
+  </nav>
+  <main>
+    <section id="overview-panel" class="tab-panel active" role="tabpanel">
+      <div class="section"><h2>Overview</h2><div class="section-body stack">
+        <div class="grid"><div class="metric"><span class="label">Inspected website</span><span id="inspected-site" class="value">Reading tab…</span></div><div class="metric"><span class="label">URL</span><span id="inspected-url" class="value mono">—</span></div></div>
+        <div class="grid"><div class="metric"><span class="label">Project root</span><span id="project-root" class="value mono">—</span></div><div class="metric"><span class="label">Framework</span><span id="framework" class="value">Detecting…</span></div></div>
+        <div class="grid"><div class="metric"><span class="label">Extension/content script</span><span id="content-status" class="status warn">Not checked</span></div><div class="metric"><span class="label">Identity synchronization</span><span id="identity-status" class="status warn">Not checked</span></div></div>
+        <div class="grid"><div class="metric"><span class="label">Source mapping</span><span id="mapping-status" class="status warn">Not checked</span></div><div class="metric"><span class="label">Backend availability</span><span id="backend-availability" class="status warn">Not configured</span></div></div>
+        <div class="grid"><div class="metric"><span class="label">Backend traces</span><span id="trace-status" class="status warn">Not connected</span></div><div class="metric"><span class="label">Last synchronization</span><span id="last-sync" class="value">Never</span></div></div>
+        <div id="connection-message" class="notice" role="status">Set the agent URL and token in Settings, then run Sync Tree.</div>
+        <div class="row"><button id="btn-sync" class="primary">Sync tree</button><button id="btn-open-settings" type="button">Connection settings</button></div>
+      </div></div>
+      <div class="section"><h2>Component tree</h2><div class="section-body"><div id="component-tree" class="tree muted">No identities loaded.</div></div></div>
+    </section>
+
+    <section id="inspector-panel" class="tab-panel" role="tabpanel" hidden>
+      <div class="section"><h2>Element inspector</h2><div class="section-body stack">
+        <div class="row"><button id="btn-inspect" class="primary">Inspect element</button><button id="btn-locate" disabled>Locate in DOM</button></div>
+        <div class="inspector"><strong id="inspector-title">No element selected</strong><div id="inspector-file" class="small mono muted">Source mapping unavailable</div><div id="instance-meta" class="small muted"></div></div>
+        <div class="grid"><div class="metric"><span class="label">data-dev-id</span><span id="inspector-dev-id" class="value mono">—</span></div><div class="metric"><span class="label">DOM tag</span><span id="inspector-tag" class="value mono">—</span></div></div>
+        <div class="row"><button id="btn-open-front" disabled>Open source in IDE</button><button id="btn-copy-bundle">Copy Cursor bundle</button></div>
+        <label class="label" for="select-prop">Editable source value</label><select id="select-prop" style="display:none"><option value="">No static string props</option></select><input id="input-universal" placeholder="Select an element to edit…" disabled aria-label="Editable source value" />
+        <div class="row"><button id="btn-preview" disabled>Preview patch</button><button id="btn-apply" class="success" disabled>Apply patch</button><button id="btn-rollback" class="danger" disabled>Rollback</button></div>
+        <div id="edit-label" class="small muted">Select an element to see editable source ranges.</div><span id="edit-type-badge" class="pill">—</span>
+        <h3 class="label">Source and patch result</h3><pre id="code-preview">Select an element from the page or component tree.</pre>
+        <h3 class="label">Runtime props and state</h3><pre id="props-preview">Inspect an element to view runtime data.</pre>
+      </div></div>
+    </section>
+
+    <section id="diagnostics-panel" class="tab-panel" role="tabpanel" hidden>
+      <div class="section"><h2>Diagnostics</h2><div class="section-body stack">
+        <div class="check"><span>Accessibility scan</span><span id="a11y-state" class="state">Not run</span></div><div class="check"><span>Console and runtime errors</span><span id="issues-state" class="state">Not run</span></div><div class="check"><span>Network failures</span><span id="network-state" class="state">Not run</span></div><div class="check"><span>Backend traces and correlation IDs</span><span id="backend-state" class="state">Not connected</span></div>
+        <div class="row"><button id="btn-a11y">Scan mapped elements</button><button id="btn-issues">Inspect runtime issues</button></div><div id="a11y-alerts"></div><div id="runtime-findings" class="stack"></div>
+      </div></div>
+      <div class="section"><h2>Backend traces</h2><div class="section-body"><div id="traces-container" class="stack"><div class="muted">No backend trace received.</div></div></div></div>
+    </section>
+
+    <section id="changes-panel" class="tab-panel" role="tabpanel" hidden>
+      <div class="section"><h2>Git and changes</h2><div class="section-body stack"><div class="grid"><div class="metric"><span class="label">Checked directory</span><span id="git-directory" class="value mono">—</span></div><div class="metric"><span class="label">Repository root</span><span id="git-root" class="value mono">—</span></div></div><div id="git-state" class="notice">Git inspection has not run.</div><div class="row"><button id="btn-git">Inspect Git diff</button><button id="btn-tsc">Run typecheck</button></div><pre id="git-summary">Run Git inspection to see branch, files, and diff.</pre></div></div>
+      <div class="section"><h2>Checkpoints</h2><div class="section-body"><div id="checkpoint-list" class="muted">No edits yet.</div></div></div>
+    </section>
+
+    <section id="ai-panel" class="tab-panel" role="tabpanel"><div class="section"><h2>AI assistant</h2><div class="section-body stack"><div id="ai-settings-summary" class="notice">AI provider is not configured.</div><div class="notice">AI output is untrusted. Review the actual diff, validate it, and explicitly confirm before applying.</div><div class="row"><button id="btn-ai-fix" disabled>Generate proposed fix</button><button id="btn-ai-apply" class="success" disabled>Apply proposed fix</button></div><div id="ai-explanation" class="small"></div><pre id="ai-diff">No proposed change.</pre></div></div></section>
+
+    <section id="settings-panel" class="tab-panel" role="tabpanel"><div class="section"><h2>Settings</h2><div class="section-body stack"><div class="notice">Connection and AI settings are stored locally in this DevTools extension. Secrets are masked in the interface and are never logged.</div><div class="row"><button id="btn-settings-panel" type="button">Edit settings</button></div></div></div></section>
+  </main>
+
+  <div id="settings-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal-card"><h2 id="settings-title">DevBridge settings</h2><div id="settings-error" class="error-text small" role="alert"></div>
+      <div class="field"><label for="modal-agent-url">Agent endpoint</label><input id="modal-agent-url" value="http://127.0.0.1:4321" autocomplete="url" /></div>
+      <div class="field"><label for="modal-agent-token">Development token</label><input id="modal-agent-token" type="password" autocomplete="off" placeholder="Set DEVBRIDGE_TOKEN value" /></div>
+      <div class="field"><label for="modal-backend-url">Backend health endpoint (optional)</label><input id="modal-backend-url" placeholder="http://127.0.0.1:4000/api/health" autocomplete="url" /></div>
+      <div class="field"><label for="modal-ai-provider">AI provider</label><select id="modal-ai-provider"><option value="gemini">Google Gemini</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="openai-compatible">OpenAI-compatible gateway</option></select></div>
+      <div class="field"><label for="modal-ai-model">AI model</label><input id="modal-ai-model" placeholder="Provider default" autocomplete="off" /></div>
+      <div class="field"><label for="modal-ai-apikey">AI API key (optional for configured agent/local gateway)</label><input id="modal-ai-apikey" type="password" autocomplete="off" /></div>
+      <div class="field"><label for="modal-ai-baseurl">AI gateway URL</label><input id="modal-ai-baseurl" placeholder="Only for OpenAI-compatible provider" autocomplete="url" /></div>
+      <div class="row" style="margin-top:10px"><button id="btn-save-settings" class="success">Validate and save</button><button id="btn-close-settings">Close</button></div>
+    </div>
+  </div>
+  <script src="panel.js"></script>
+</body>
+</html>
