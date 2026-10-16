@@ -23,6 +23,9 @@ importers:
 
   apps/local-agent:
     dependencies:
+      '@babel/parser':
+        specifier: ^7.26.0
+        version: 7.29.9
       '@devbridge/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

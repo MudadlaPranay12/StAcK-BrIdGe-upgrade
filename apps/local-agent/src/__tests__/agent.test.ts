@@ -20,7 +20,7 @@ describe('DevBridge SecurityManager & Atomic PatchEngine', () => {
       'utf8'
     );
     security = new SecurityManager(tmpDir, tmpDir, 'test-secret');
-    patchEngine = new PatchEngine(security);
+    patchEngine = new PatchEngine(security, tmpDir);
   });
 
   afterEach(() => {

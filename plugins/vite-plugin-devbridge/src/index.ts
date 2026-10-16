@@ -93,6 +93,58 @@ export function devbridgePlugin(options: DevBridgePluginOptions = {}): Plugin {
 
       const records: DevIdentityRecord[] = [];
       let currentComponent = 'Anonymous';
+      // Ancestor data-dev-id stack for Component Tree nesting (parentId)
+      const elementStack: string[] = [];
+
+      // className="..." OR className={cn("...", ...)} / clsx(...) OR className={`...`}
+      // returns the first statically-editable string range found.
+      function extractClassName(
+        attr: t.JSXAttribute
+      ): DevIdentityRecord['classNameRange'] | undefined {
+        if (t.isStringLiteral(attr.value as any) && (attr.value as t.StringLiteral).loc) {
+          const lit = attr.value as t.StringLiteral;
+          return {
+            rawValue: lit.value,
+            start: { line: lit.loc!.start.line, column: lit.loc!.start.column },
+            end: { line: lit.loc!.end.line, column: lit.loc!.end.column },
+          };
+        }
+        if (!t.isJSXExpressionContainer(attr.value)) return undefined;
+        const expr = attr.value.expression;
+        // cn("bg-blue-600", cond && "px-4") / clsx(...) / twMerge(...) — first static string wins
+        if (t.isCallExpression(expr)) {
+          const callee = expr.callee;
+          const name = t.isIdentifier(callee)
+            ? callee.name
+            : t.isMemberExpression(callee) && t.isIdentifier(callee.property)
+              ? (callee.property.name as string)
+              : '';
+          if (!/^(cn|clsx|clsxm|twMerge|twJoin)$/.test(name)) return undefined;
+          const firstStrArg = expr.arguments.find((arg) => t.isStringLiteral(arg)) as
+            | t.StringLiteral
+            | undefined;
+          if (firstStrArg?.loc) {
+            return {
+              rawValue: firstStrArg.value,
+              start: { line: firstStrArg.loc.start.line, column: firstStrArg.loc.start.column },
+              end: { line: firstStrArg.loc.end.line, column: firstStrArg.loc.end.column },
+            };
+          }
+          return undefined;
+        }
+        // className={`bg-blue-600`} — static template literal without expressions
+        if (t.isTemplateLiteral(expr) && expr.expressions.length === 0 && expr.quasis.length === 1) {
+          const quasi = expr.quasis[0];
+          if (quasi.loc) {
+            return {
+              rawValue: quasi.value.cooked ?? quasi.value.raw,
+              start: { line: quasi.loc.start.line, column: quasi.loc.start.column },
+              end: { line: quasi.loc.end.line, column: quasi.loc.end.column },
+            };
+          }
+        }
+        return undefined;
+      }
 
       traverse(ast, {
         FunctionDeclaration(p: any) {
@@ -105,7 +157,8 @@ export function devbridgePlugin(options: DevBridgePluginOptions = {}): Plugin {
             currentComponent = p.node.id.name;
           }
         },
-        JSXElement(p: any) {
+        JSXElement: {
+          enter(p: any) {
           const element = p.node as t.JSXElement;
           const node = element.openingElement as t.JSXOpeningElement;
           if (!node.loc || !element.loc) return;
@@ -129,28 +182,28 @@ export function devbridgePlugin(options: DevBridgePluginOptions = {}): Plugin {
           const rawKey = `${relFile}:${start.line}:${start.column}:${currentComponent}:${tagName}`;
           const hash = crypto.createHash('sha1').update(rawKey).digest('hex').slice(0, 8);
           const devId = `dvi_${hash}`;
+          const parentId = elementStack.length > 0 ? elementStack[elementStack.length - 1] : undefined;
 
-          // Check for static className attribute to allow surgical Tailwind editing
+          // Static className, cn()/clsx() first string, or static template literal
           let classNameRange: DevIdentityRecord['classNameRange'] | undefined;
           const stringProps: NonNullable<DevIdentityRecord['stringProps']> = [];
           for (const attr of node.attributes) {
+            if (!t.isJSXAttribute(attr) || !t.isJSXIdentifier(attr.name)) continue;
+            if (attr.name.name === 'className') {
+              classNameRange = extractClassName(attr) ?? classNameRange;
+              continue;
+            }
             if (
-              t.isJSXAttribute(attr) &&
-              t.isJSXIdentifier(attr.name) &&
               t.isStringLiteral(attr.value as any) &&
               (attr.value as t.StringLiteral).loc
             ) {
               const lit = attr.value as t.StringLiteral;
-              const range = {
+              stringProps.push({
+                name: attr.name.name as string,
                 rawValue: lit.value,
                 start: { line: lit.loc!.start.line, column: lit.loc!.start.column },
                 end: { line: lit.loc!.end.line, column: lit.loc!.end.column },
-              };
-              if (attr.name.name === 'className') {
-                classNameRange = range;
-              } else {
-                stringProps.push({ name: attr.name.name as string, ...range });
-              }
+              });
             }
           }
 
@@ -203,10 +256,16 @@ export function devbridgePlugin(options: DevBridgePluginOptions = {}): Plugin {
             file: relFile,
             start: { line: start.line, column: start.column },
             end: { line: end.line, column: end.column },
+            parentId,
             classNameRange,
             textRange,
             stringProps: stringProps.length > 0 ? stringProps : undefined,
           });
+          elementStack.push(devId);
+          },
+          exit() {
+            elementStack.pop();
+          },
         },
       });
 
@@ -214,14 +273,15 @@ export function devbridgePlugin(options: DevBridgePluginOptions = {}): Plugin {
 
         console.log(`[DevBridge Vite] Stamped ${records.length} elements in ${relFile}`);
 
-        // Sync records to the Local Agent asynchronously
+        // Sync records to the Local Agent asynchronously (file key lets the
+        // agent evict stale identities from this file on HMR re-transforms)
         fetch(`${agentUrl}/api/v1/identities/batch`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'X-DevBridge-Token': agentToken,
           },
-          body: JSON.stringify({ records }),
+          body: JSON.stringify({ file: relFile, records }),
         }).catch((err) => {
           console.error('[DevBridge Vite] Failed to sync identities to agent:', (err as Error).message);
         });

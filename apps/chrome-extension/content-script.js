@@ -133,8 +133,44 @@ if (!window.__DEVBRIDGE_CONTENT_SCRIPT_LOADED__) {
     }
   }
 
-  function flashNodes(nodes) {
+  // Lightweight Accessibility (a11y) audit for a DOM element:
+  // missing accessible names, missing img alt / form labels,
+  // click-handler divs without roles, and tiny font sizes.
+  function scanElementAccessibility(el) {
     try {
+      const issues = [];
+      const tag = el.tagName.toLowerCase();
+      const ariaLabel = el.getAttribute("aria-label") || el.getAttribute("aria-labelledby");
+      const text = (el.innerText || "").trim();
+
+      if (tag === "button" && !text && !ariaLabel) {
+        issues.push("CRITICAL: <button> has no accessible text or aria-label.");
+      }
+      if (tag === "a" && !text && !ariaLabel) {
+        issues.push("CRITICAL: <a> link has no discernible text or aria-label.");
+      }
+      if (tag === "img" && !el.hasAttribute("alt")) {
+        issues.push("CRITICAL: <img> element is missing an 'alt' attribute.");
+      }
+      if ((tag === "input" || tag === "select" || tag === "textarea") && !ariaLabel && !el.id) {
+        issues.push("HIGH: Form input is missing an associated <label> or aria-label.");
+      }
+      if (el.hasAttribute("onclick") && tag === "div" && !el.getAttribute("role")) {
+        issues.push("HIGH: Non-interactive <div> has click handler without role='button'.");
+      }
+      try {
+        const style = window.getComputedStyle(el);
+        if (parseFloat(style.fontSize) < 12) {
+          issues.push(`WARN: Font size (${style.fontSize}) is smaller than recommended 12px minimum.`);
+        }
+      } catch {}
+      return issues;
+    } catch {
+      return [];
+    }
+  }
+
+  function flashNodes(nodes) {    try {
       nodes.forEach((n, i) => {
         try {
           const prevOutline = n.style.outline;
@@ -205,6 +241,7 @@ if (!window.__DEVBRIDGE_CONTENT_SCRIPT_LOADED__) {
 
         const nodes = document.querySelectorAll(`[data-dev-id="${devId}"]`);
         const { fiberProps, fiberState, fiberComponent } = extractFiberInfo(target);
+        const a11yIssues = scanElementAccessibility(target);
 
         try {
           chrome.runtime.sendMessage({
@@ -217,6 +254,7 @@ if (!window.__DEVBRIDGE_CONTENT_SCRIPT_LOADED__) {
             fiberProps,
             fiberState,
             fiberComponent,
+            a11yIssues,
           });
         } catch (msgErr) {
           console.error("[DevBridge] Click selection error:", msgErr);
@@ -269,7 +307,7 @@ if (!window.__DEVBRIDGE_CONTENT_SCRIPT_LOADED__) {
         try {
           const nodes = document.querySelectorAll(`[data-dev-id="${msg.devId}"]`);
           if (nodes.length === 0) {
-            if (sendResponse) sendResponse({ count: 0 });
+            if (sendResponse) sendResponse({ count: 0, a11yIssues: [] });
             return true;
           }
           try {
@@ -286,8 +324,32 @@ if (!window.__DEVBRIDGE_CONTENT_SCRIPT_LOADED__) {
               }, 1500);
             } catch {}
           });
-          if (sendResponse) sendResponse({ count: nodes.length });
+          let a11yIssues = [];
+          try {
+            a11yIssues = scanElementAccessibility(nodes[0]);
+          } catch {}
+          if (sendResponse) sendResponse({ count: nodes.length, a11yIssues });
         } catch {}
+      } else if (msg.type === "SCAN_PAGE_A11Y") {
+        // Full-page audit over mapped elements only
+        try {
+          const allNodes = document.querySelectorAll("[data-dev-id]");
+          const report = [];
+          allNodes.forEach((node) => {
+            try {
+              const issues = scanElementAccessibility(node);
+              if (issues.length > 0) {
+                report.push({
+                  devId: node.getAttribute("data-dev-id"),
+                  tagName: node.tagName.toLowerCase(),
+                  issues,
+                });
+              }
+            } catch {}
+          });
+          if (sendResponse) sendResponse({ report });
+        } catch {}
+        return true;
       }
     } catch (err) {
       console.error("[DevBridge Message Error]:", err);

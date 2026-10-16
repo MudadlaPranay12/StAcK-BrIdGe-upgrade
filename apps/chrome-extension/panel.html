@@ -3,88 +3,146 @@
 <head>
   <meta charset="utf-8" />
   <style>
-    body { font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; height: 95vh; box-sizing: border-box; }
-    .card { background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 12px; overflow: auto; }
-    h3 { margin: 0 0 8px 0; font-size: 13px; color: #93c5fd; text-transform: uppercase; letter-spacing: 0.5px; }
-    button { background: #2563eb; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; margin-right: 6px; margin-bottom: 6px; }
+    :root {
+      --bg-main: #0f172a;
+      --bg-card: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #3b82f6;
+      --success: #16a34a;
+      --danger: #dc2626;
+      --warn: #d97706;
+      --accent: #38bdf8;
+    }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg-main); color: var(--text); margin: 0; padding: 10px; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; gap: 8px; overflow: hidden; }
+
+    /* Top Header */
+    .header { display: flex; justify-content: space-between; align-items: center; background: var(--bg-card); padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); flex-wrap: wrap; gap: 6px; }
+    .logo { font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+    .logo span { font-weight: 400; font-size: 11px; color: var(--text-muted); }
+    .pill { font-size: 10px; padding: 2px 6px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
+    .pill.online { background: rgba(22,163,74,0.2); color: #4ade80; border: 1px solid #16a34a; }
+    .pill.offline { background: rgba(220,38,38,0.2); color: #f87171; border: 1px solid #dc2626; }
+
+    /* Main Grid Layout */
+    .grid { display: grid; grid-template-columns: 220px 1fr 1fr; gap: 8px; flex: 1; min-height: 0; }
+    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+
+    h3 { margin: 4px 0; font-size: 11px; color: #93c5fd; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    button { background: var(--primary); color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 500; margin-right: 4px; margin-bottom: 4px; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
     button.secondary { background: #475569; }
-    button.success { background: #16a34a; }
-    button.danger { background: #dc2626; }
-    input { width: 100%; padding: 6px; background: #0f172a; border: 1px solid #475569; color: #fff; border-radius: 4px; font-family: monospace; box-sizing: border-box; margin-bottom: 8px; }
-    select { width: 100%; padding: 6px; background: #0f172a; border: 1px solid #475569; color: #fff; border-radius: 4px; font-family: monospace; box-sizing: border-box; margin-bottom: 8px; }
-    pre { background: #020617; padding: 8px; border-radius: 4px; overflow-x: auto; font-size: 11px; line-height: 1.4; border: 1px solid #1e293b; }
-    .trace-box { border-left: 3px solid #ef4444; padding-left: 8px; margin-top: 8px; background: rgba(239,68,68,0.08); padding: 8px; border-radius: 4px; }
+    button.success { background: var(--success); }
+    button.danger { background: var(--danger); }
+    button.warn { background: var(--warn); }
+
+    input, select { width: 100%; padding: 6px; background: #0f172a; border: 1px solid #475569; color: #fff; border-radius: 4px; font-family: monospace; font-size: 11px; box-sizing: border-box; }
+
+    pre { background: #020617; padding: 8px; border-radius: 4px; overflow-x: auto; font-size: 11px; line-height: 1.4; border: 1px solid var(--border); margin: 0; font-family: ui-monospace, monospace; }
+    #code-preview { color: var(--accent); }
+
+    .tree-item { padding: 4px 6px; font-size: 11px; font-family: monospace; border-radius: 4px; cursor: pointer; color: #cbd5e1; display: flex; justify-content: space-between; gap: 6px; }
+    .tree-item:hover, .tree-item.active { background: #334155; color: #fff; }
+    .tree-children { margin-left: 12px; border-left: 1px solid var(--border); padding-left: 4px; }
+
+    .inspector-box { background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+    .trace-box { border-left: 3px solid var(--danger); background: rgba(239,68,68,0.08); padding: 8px; border-radius: 4px; font-size: 11px; }
+    .a11y-box { border-left: 3px solid var(--warn); background: rgba(245,158,11,0.1); padding: 6px; border-radius: 4px; font-size: 11px; color: #fde68a; }
+    .mini { font-size: 10px; color: var(--text-muted); }
   </style>
 </head>
 <body>
-  <!-- Left Column: Surgical Patch & Diff -->
-  <div class="card">
-    <h3>1. Inspect & Surgical Tailwind/Class Patch</h3>
-    <div>
-      <button id="btn-inspect">Inspect Element</button>
-      <button id="btn-open-front" class="secondary" disabled>Open in Cursor (Frontend)</button>
-      <button id="btn-locate" class="secondary" disabled>Locate in DOM</button>
-      <button id="btn-rollback" class="danger">Rollback Last Patch</button>
+  <div class="header">
+    <div class="logo">⚡ DevBridge <span>DOM ↔ AST ↔ Git ↔ Backend</span></div>
+    <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+      <button id="btn-sync" class="secondary">Sync Tree</button>
+      <button id="btn-a11y" class="warn">Scan A11y</button>
+      <button id="btn-git" class="secondary">Git Diff</button>
+      <button id="btn-tsc" class="success">tsc Check</button>
+      <span id="agent-status" class="pill offline">🔴 Agent Offline</span>
     </div>
-    <div id="identity-meta" style="font-size:12px; margin:8px 0; color:#cbd5e1;">No element selected.</div>
-    <div id="instance-meta" style="font-size:11px; margin:0 0 8px 0; color:#6ee7b7;"></div>
-
-    <label style="font-size:11px; color:#94a3b8;">Surgical ClassName Editor (Live Previews in DOM):</label>
-    <input id="input-classname" placeholder="Select an element with a static className..." disabled />
-
-    <div>
-      <button id="btn-preview-diff" class="secondary" disabled>Stage & Preview Diff</button>
-      <button id="btn-apply-patch" class="success" disabled>Apply Atomic Patch to Disk</button>
-    </div>
-
-    <label style="font-size:11px; color:#94a3b8; margin-top:8px; display:block;">Surgical Text Editor (Live Previews in DOM):</label>
-    <input id="input-text" placeholder="Select an element with static text..." disabled />
-    <div>
-      <button id="btn-preview-text" class="secondary" disabled>Preview Text Diff</button>
-      <button id="btn-apply-text" class="success" disabled>Apply Text Patch</button>
-    </div>
-
-    <label style="font-size:11px; color:#94a3b8; margin-top:8px; display:block;">Static Prop Editor:</label>
-    <select id="select-prop" disabled><option value="">(No static string props)</option></select>
-    <input id="input-prop" placeholder="Select a prop to edit..." disabled />
-    <div>
-      <button id="btn-preview-prop" class="secondary" disabled>Preview Prop Diff</button>
-      <button id="btn-apply-prop" class="success" disabled>Apply Prop Patch</button>
-    </div>
-
-    <h3>Source Snippet & Staged Unified Diff</h3>
-    <pre id="code-preview">// Select an element on the page to view its exact AST source range...</pre>
-
-    <h3>Live React Props & State (Fiber)</h3>
-    <pre id="props-preview">// Inspect an element to see its live runtime props/state...</pre>
-
-    <h3>Enterprise AI Settings (BYOK)</h3>
-    <select id="ai-provider">
-      <option value="gemini">Google Gemini (Default)</option>
-      <option value="openai">OpenAI (GPT-4o)</option>
-      <option value="anthropic">Anthropic Claude</option>
-      <option value="openai-compatible">Custom Gateway / Local (Ollama)</option>
-    </select>
-    <input id="ai-apikey" type="password" placeholder="Enter API Key (BYOK, session-only)..." autocomplete="off" />
-    <input id="ai-model" placeholder="Model override (e.g. gpt-4o, claude-3-5)..." autocomplete="off" />
-    <input id="ai-baseurl" placeholder="Base URL (custom gateway only, e.g. http://127.0.0.1:11434/v1)..." autocomplete="off" />
-
-    <h3>AI Visual Delta & Quick Fixes</h3>
-    <div>
-      <button id="btn-ai-fix" class="secondary" disabled>Generate AI Quick Fix</button>
-      <button id="btn-ai-apply" class="success" disabled>Apply AI Patch</button>
-    </div>
-    <div id="ai-explanation" style="font-size:11px; color:#38bdf8; margin:6px 0;"></div>
   </div>
 
-  <!-- Right Column: Full-Stack Trace & Cursor AI Context -->
-  <div class="card">
-    <h3>2. Full-Stack X-Ray (UI Click → Network → Backend Crash)</h3>
-    <div>
-      <button id="btn-copy-ai" class="secondary">Copy Full-Stack Bug Bundle for Cursor AI</button>
+  <div class="grid">
+    <!-- Col 1: Component Tree & Checkpoints -->
+    <div class="card">
+      <h3>Component Tree</h3>
+      <div id="component-tree" style="flex:1; overflow-y:auto; font-size:11px;">Click "Sync Tree" or reload page...</div>
+      <h3>Checkpoints</h3>
+      <div id="checkpoint-list" style="max-height:90px; overflow-y:auto; font-size:10px; color:var(--text-muted);">No edits yet.</div>
     </div>
-    <div id="traces-container" style="font-size:12px; margin-top:8px;">
-      Listening for correlated backend traces on 127.0.0.1:4321...
+
+    <!-- Col 2: Smart Unified Inspector & Surgical Editor -->
+    <div class="card">
+      <h3>Inspector &amp; Surgical Editor</h3>
+      <div style="display: flex; gap: 4px;">
+        <button id="btn-inspect" style="flex:1;">Inspect Element</button>
+        <button id="btn-locate" class="warn" style="flex:1;" disabled>Locate in DOM</button>
+        <button id="btn-rollback" class="danger">Rollback</button>
+      </div>
+
+      <!-- Smart Inspector Card -->
+      <div class="inspector-box">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px;">
+          <span id="inspector-title" style="font-size: 11px; font-weight: 600; color: #93c5fd;">No element selected</span>
+          <button id="btn-open-front" class="secondary" style="padding: 2px 6px; font-size: 10px; margin: 0;" disabled>Open in Cursor</button>
+        </div>
+        <div id="inspector-file" style="font-size: 10px; font-family: monospace; color: var(--text-muted);">—</div>
+        <div id="instance-meta" style="font-size: 10px; color: #6ee7b7;"></div>
+      </div>
+
+      <div id="a11y-alerts"></div>
+
+      <!-- Unified Edit Field (adapts to Class / Text / Prop) -->
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted);">
+          <span id="edit-label">Live Editor (Class / Text):</span>
+          <span id="edit-type-badge" style="color: #38bdf8;">—</span>
+        </div>
+        <select id="select-prop" style="display:none;"><option value="">(No static string props)</option></select>
+        <input id="input-universal" placeholder="Select an element to edit..." disabled />
+        <div style="display: flex; gap: 4px;">
+          <button id="btn-preview" class="secondary" style="flex:1;" disabled>Preview Diff</button>
+          <button id="btn-apply" class="success" style="flex:1;" disabled>Apply Patch</button>
+        </div>
+      </div>
+
+      <h3>Source / Unified Diff / Logs</h3>
+      <pre id="code-preview">// Select an element from the page or Component Tree...</pre>
+
+      <h3>Live React Props &amp; State (Fiber)</h3>
+      <pre id="props-preview">// Inspect an element to see its live runtime props/state...</pre>
+    </div>
+
+    <!-- Col 3: AI Assistant & Full-Stack X-Ray -->
+    <div class="card">
+      <h3>Enterprise AI Quick Fix (BYOK)</h3>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+        <select id="ai-provider">
+          <option value="gemini">Gemini</option>
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Claude</option>
+          <option value="openai-compatible">Ollama</option>
+        </select>
+        <input id="ai-model" placeholder="Model override..." autocomplete="off" />
+      </div>
+      <input id="ai-apikey" type="password" placeholder="API Key (session-only)..." autocomplete="off" />
+      <input id="ai-baseurl" placeholder="Base URL (custom gateway only)..." autocomplete="off" />
+      <div style="display: flex; gap: 4px;">
+        <button id="btn-ai-fix" class="secondary" style="flex:1;" disabled>Propose AI Fix</button>
+        <button id="btn-ai-apply" class="success" style="flex:1;" disabled>Apply AI Patch</button>
+      </div>
+      <div style="display: flex; gap: 4px;">
+        <button id="btn-copy-bundle" class="secondary" style="flex:1;">Copy Cursor Bundle</button>
+      </div>
+      <div id="ai-explanation" style="font-size: 11px; color: #38bdf8; min-height: 16px;"></div>
+
+      <h3>Full-Stack X-Ray (Backend Crash)</h3>
+      <div id="traces-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 11px; color: #64748b;">Listening for errors...</div>
+      </div>
     </div>
   </div>
 

@@ -10,6 +10,7 @@ export interface DevIdentityRecord {
   file: string;               // Project-relative path: "src/components/Hero.tsx"
   start: SourcePosition;
   end: SourcePosition;
+  parentId?: string;          // Nearest ancestor JSX data-dev-id (for Component Tree nesting)
   classNameRange?: {          // Exact AST range of className="..." for surgical Tailwind edits
     rawValue: string;
     start: SourcePosition;

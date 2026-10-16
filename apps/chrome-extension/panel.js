@@ -1,4 +1,4 @@
-// panel.js
+// panel.js — DevBridge DevTools: unified Smart Inspector + tree + a11y + git + verify + AI + X-Ray
 const AGENT_URL = "http://127.0.0.1:4321";
 const AGENT_TOKEN = "devbridge-local-secret";
 const tabId = chrome.devtools.inspectedWindow.tabId;
@@ -8,38 +8,45 @@ port.postMessage({ type: "INIT", tabId });
 
 let currentRecord = null;
 let currentFileHash = null;
-let latestBackendTrace = null;
 let currentRuntime = null; // { fiberProps, fiberState, fiberComponent, instanceCount, innerText }
-let pendingAiPatch = null; // { start, end, replacement } staged by Gemini, applied via Apply AI Patch
+let currentA11yIssues = [];
+let latestBackendTrace = null;
+let lastCheckpointId = null;
 let inspectEnabled = false;
+// Unified editor state: 'className' | 'text' | 'prop' | null; 'ai' marks a staged AI element patch
+let editMode = null;
+let stagedKind = "surgical";
+let pendingAiPatch = null; // { start, end, replacement }
+
+const agentStatus = document.getElementById("agent-status");
+const componentTree = document.getElementById("component-tree");
+const checkpointList = document.getElementById("checkpoint-list");
+const codePreview = document.getElementById("code-preview");
+const propsPreview = document.getElementById("props-preview");
+const inspectorTitle = document.getElementById("inspector-title");
+const inspectorFile = document.getElementById("inspector-file");
+const instanceMeta = document.getElementById("instance-meta");
+const a11yAlerts = document.getElementById("a11y-alerts");
+const inputUniversal = document.getElementById("input-universal");
+const selectProp = document.getElementById("select-prop");
+const editLabel = document.getElementById("edit-label");
+const editTypeBadge = document.getElementById("edit-type-badge");
+const aiExplanation = document.getElementById("ai-explanation");
+const tracesContainer = document.getElementById("traces-container");
 
 const btnInspect = document.getElementById("btn-inspect");
-const btnOpenFront = document.getElementById("btn-open-front");
 const btnLocate = document.getElementById("btn-locate");
+const btnOpenFront = document.getElementById("btn-open-front");
 const btnRollback = document.getElementById("btn-rollback");
-const btnPreviewDiff = document.getElementById("btn-preview-diff");
-const btnApplyPatch = document.getElementById("btn-apply-patch");
-const btnPreviewText = document.getElementById("btn-preview-text");
-const btnApplyText = document.getElementById("btn-apply-text");
-const btnPreviewProp = document.getElementById("btn-preview-prop");
-const btnApplyProp = document.getElementById("btn-apply-prop");
-const btnCopyAi = document.getElementById("btn-copy-ai");
+const btnPreview = document.getElementById("btn-preview");
+const btnApply = document.getElementById("btn-apply");
 const btnAiFix = document.getElementById("btn-ai-fix");
 const btnAiApply = document.getElementById("btn-ai-apply");
-const aiExplanation = document.getElementById("ai-explanation");
+const btnCopyBundle = document.getElementById("btn-copy-bundle");
 const aiProvider = document.getElementById("ai-provider");
 const aiApiKey = document.getElementById("ai-apikey");
 const aiModel = document.getElementById("ai-model");
 const aiBaseUrl = document.getElementById("ai-baseurl");
-const inputClassName = document.getElementById("input-classname");
-const inputText = document.getElementById("input-text");
-const selectProp = document.getElementById("select-prop");
-const inputProp = document.getElementById("input-prop");
-const identityMeta = document.getElementById("identity-meta");
-const instanceMeta = document.getElementById("instance-meta");
-const codePreview = document.getElementById("code-preview");
-const propsPreview = document.getElementById("props-preview");
-const tracesContainer = document.getElementById("traces-container");
 
 async function agentFetch(path, options = {}) {
   const res = await fetch(`${AGENT_URL}${path}`, {
@@ -55,299 +62,7 @@ async function agentFetch(path, options = {}) {
   return data;
 }
 
-// Generic surgical patch helper — refreshes range end so consecutive edits work without re-inspect
-async function applyRangePatch(range, replacement, onApplied) {
-  const res = await agentFetch("/api/v1/patches/apply", {
-    method: "POST",
-    body: JSON.stringify({
-      file: currentRecord.file,
-      originalHash: currentFileHash,
-      start: range.start,
-      end: range.end,
-      replacement,
-    }),
-  });
-  currentFileHash = res.newHash;
-  // Replacement is single-line from here on (quotes included for literals)
-  range.end = {
-    line: range.start.line,
-    column: range.start.column + replacement.length,
-  };
-  // Any manual edit invalidates a staged AI element patch — re-generate it.
-  pendingAiPatch = null;
-  if (typeof btnAiApply !== "undefined" && btnAiApply) btnAiApply.disabled = true;
-  if (onApplied) onApplied(res);
-  return res;
-}
-
-async function previewRangePatch(range, replacement) {
-  const res = await agentFetch("/api/v1/patches/preview", {
-    method: "POST",
-    body: JSON.stringify({
-      file: currentRecord.file,
-      originalHash: currentFileHash,
-      start: range.start,
-      end: range.end,
-      replacement,
-    }),
-  });
-  codePreview.textContent = res.unifiedDiff;
-}
-
-// 1. Toggle Inspect Mode
-btnInspect.addEventListener("click", () => {
-  inspectEnabled = !inspectEnabled;
-  btnInspect.textContent = inspectEnabled ? "Cancel Inspect" : "Inspect Element";
-  port.postMessage({ type: "TOGGLE_INSPECT", tabId, enabled: inspectEnabled });
-});
-
-// 1b. Locate in DOM — flash + scroll to every live node with this data-dev-id
-if (btnLocate) {
-  btnLocate.addEventListener("click", () => {
-    if (!currentRecord) return;
-    port.postMessage({ type: "LOCATE_IN_DOM", tabId, devId: currentRecord.id });
-    if (instanceMeta) instanceMeta.textContent = `Locating ${currentRecord.id} in DOM…`;
-  });
-}
-
-// 2. Receive Selected Element from Content Script
-port.onMessage.addListener(async (msg) => {
-  if (msg.type === "INSTANCES_FLASHED") {
-    if (instanceMeta && msg.devId === currentRecord?.id) {
-      instanceMeta.textContent =
-        msg.count <= 1
-          ? `1 instance in DOM`
-          : `${msg.count} instances in DOM (e.g. .map() loop) — all flashed`;
-    }
-    return;
-  }
-  if (msg.type !== "ELEMENT_SELECTED") return;
-  inspectEnabled = false;
-  btnInspect.textContent = "Inspect Element";
-
-  try {
-    const data = await agentFetch(`/api/v1/identity/${msg.devId}`);
-    currentRecord = data.record;
-    currentFileHash = data.hash;
-    currentRuntime = {
-      fiberProps: msg.fiberProps ?? null,
-      fiberState: msg.fiberState ?? null,
-      fiberComponent: msg.fiberComponent ?? null,
-      instanceCount: msg.instanceCount ?? 1,
-      innerText: msg.innerText ?? "",
-    };
-
-    identityMeta.innerHTML = `<strong>&lt;${currentRecord.componentName}&gt;</strong> (${currentRecord.tagName}) — <code>${currentRecord.file}:${currentRecord.start.line}:${currentRecord.start.column}</code>`;
-    codePreview.textContent = data.snippet;
-    btnOpenFront.disabled = false;
-    // New selection invalidates any previously staged AI patch
-    pendingAiPatch = null;
-    if (btnAiFix) btnAiFix.disabled = false;
-    if (btnAiApply) btnAiApply.disabled = true;
-    if (aiExplanation) aiExplanation.textContent = "";
-    if (btnLocate) {
-      btnLocate.disabled = false;
-      btnLocate.textContent =
-        currentRuntime.instanceCount > 1
-          ? `Locate in DOM (${currentRuntime.instanceCount})`
-          : `Locate in DOM`;
-    }
-    if (instanceMeta) {
-      instanceMeta.textContent =
-        currentRuntime.instanceCount > 1
-          ? `${currentRuntime.instanceCount} instances of ${currentRecord.id} in DOM`
-          : `1 instance in DOM`;
-    }
-
-    if (currentRecord.classNameRange) {
-      inputClassName.disabled = false;
-      inputClassName.value = currentRecord.classNameRange.rawValue;
-      btnPreviewDiff.disabled = false;
-      btnApplyPatch.disabled = false;
-    } else {
-      inputClassName.disabled = true;
-      inputClassName.value = "(No static className attribute on this element)";
-      btnPreviewDiff.disabled = true;
-      btnApplyPatch.disabled = true;
-    }
-
-    // Surgical text editor
-    if (currentRecord.textRange) {
-      inputText.disabled = false;
-      inputText.value = currentRecord.textRange.rawValue;
-      btnPreviewText.disabled = false;
-      btnApplyText.disabled = false;
-    } else {
-      inputText.disabled = true;
-      inputText.value = "(No single static text child on this element)";
-      btnPreviewText.disabled = true;
-      btnApplyText.disabled = true;
-    }
-
-    // Static prop editor
-    const props = currentRecord.stringProps || [];
-    selectProp.innerHTML = "";
-    if (props.length > 0) {
-      props.forEach((p, i) => {
-        const opt = document.createElement("option");
-        opt.value = String(i);
-        opt.textContent = `${p.name}="${p.rawValue}"`;
-        selectProp.appendChild(opt);
-      });
-      selectProp.disabled = false;
-      inputProp.disabled = false;
-      inputProp.value = props[0].rawValue;
-      btnPreviewProp.disabled = false;
-      btnApplyProp.disabled = false;
-    } else {
-      const opt = document.createElement("option");
-      opt.value = "";
-      opt.textContent = "(No static string props)";
-      selectProp.appendChild(opt);
-      selectProp.disabled = true;
-      inputProp.disabled = true;
-      inputProp.value = "";
-      btnPreviewProp.disabled = true;
-      btnApplyProp.disabled = true;
-    }
-
-    // Live React props & state inspector
-    renderFiberInspector();
-  } catch (err) {
-    identityMeta.textContent = `Error resolving identity: ${err.message}`;
-  }
-});
-
-function renderFiberInspector() {
-  if (!propsPreview) return;
-  if (!currentRuntime) {
-    propsPreview.textContent = "// Inspect an element to see its live runtime props/state...";
-    return;
-  }
-  const lines = [];
-  if (currentRuntime.fiberComponent) lines.push(`Component (fiber): ${currentRuntime.fiberComponent}`);
-  lines.push(`Instances in DOM: ${currentRuntime.instanceCount ?? 1}`);
-  lines.push(`Props: ${JSON.stringify(currentRuntime.fiberProps ?? "(no fiber — static DOM node)", null, 2)}`);
-  lines.push(`State/Hooks: ${JSON.stringify(currentRuntime.fiberState ?? "(no hooks/class state)", null, 2)}`);
-  propsPreview.textContent = lines.join("\n");
-}
-
-if (selectProp) {
-  selectProp.addEventListener("change", () => {
-    const props = currentRecord?.stringProps || [];
-    const p = props[Number(selectProp.value)];
-    if (p) inputProp.value = p.rawValue;
-  });
-}
-
-// 3. Live DOM Preview while typing classes / text
-inputClassName.addEventListener("input", () => {
-  if (!currentRecord) return;
-  port.postMessage({
-    type: "LIVE_PREVIEW_CLASSES",
-    tabId,
-    devId: currentRecord.id,
-    className: inputClassName.value,
-  });
-});
-
-if (inputText) {
-  inputText.addEventListener("input", () => {
-    if (!currentRecord?.textRange) return;
-    port.postMessage({
-      type: "LIVE_PREVIEW_TEXT",
-      tabId,
-      devId: currentRecord.id,
-      text: inputText.value,
-    });
-  });
-}
-
-// 4. Stage & Preview Unified Diff (className)
-btnPreviewDiff.addEventListener("click", async () => {
-  if (!currentRecord?.classNameRange) return;
-  try {
-    await previewRangePatch(currentRecord.classNameRange, `"${inputClassName.value}"`);
-  } catch (err) {
-    codePreview.textContent = `Diff Error: ${err.message}`;
-  }
-});
-
-// 4b. Preview Text Diff
-if (btnPreviewText) {
-  btnPreviewText.addEventListener("click", async () => {
-    if (!currentRecord?.textRange) return;
-    try {
-      await previewRangePatch(currentRecord.textRange, inputText.value);
-    } catch (err) {
-      codePreview.textContent = `Diff Error: ${err.message}`;
-    }
-  });
-}
-
-// 4c. Preview Prop Diff
-if (btnPreviewProp) {
-  btnPreviewProp.addEventListener("click", async () => {
-    const p = currentRecord?.stringProps?.[Number(selectProp.value)];
-    if (!p) return;
-    try {
-      await previewRangePatch(p, `"${inputProp.value}"`);
-    } catch (err) {
-      codePreview.textContent = `Diff Error: ${err.message}`;
-    }
-  });
-}
-
-// 5. Apply Atomic Patch (Updated to refresh end.column for consecutive edits)
-btnApplyPatch.addEventListener("click", async () => {
-  if (!currentRecord?.classNameRange) return;
-  const newLiteral = `"${inputClassName.value}"`;
-  try {
-    const res = await applyRangePatch(currentRecord.classNameRange, newLiteral);
-    currentRecord.classNameRange.rawValue = inputClassName.value;
-    codePreview.textContent = `✅ Applied safely! Checkpoint: ${res.checkpointId}`;
-  } catch (err) {
-    codePreview.textContent = `❌ Apply Blocked: ${err.message}`;
-  }
-});
-
-// 5b. Apply Text Patch
-if (btnApplyText) {
-  btnApplyText.addEventListener("click", async () => {
-    if (!currentRecord?.textRange) return;
-    try {
-      const res = await applyRangePatch(currentRecord.textRange, inputText.value);
-      currentRecord.textRange.rawValue = inputText.value;
-      codePreview.textContent = `✅ Text applied! Checkpoint: ${res.checkpointId}`;
-    } catch (err) {
-      codePreview.textContent = `❌ Apply Blocked: ${err.message}`;
-    }
-  });
-}
-
-// 5c. Apply Prop Patch
-if (btnApplyProp) {
-  btnApplyProp.addEventListener("click", async () => {
-    const p = currentRecord?.stringProps?.[Number(selectProp.value)];
-    if (!p) return;
-    const newLiteral = `"${inputProp.value}"`;
-    try {
-      const res = await applyRangePatch(p, newLiteral);
-      p.rawValue = inputProp.value;
-      // Refresh dropdown label
-      const opt = selectProp.options[Number(selectProp.value)];
-      if (opt) opt.textContent = `${p.name}="${p.rawValue}"`;
-      codePreview.textContent = `✅ Prop ${p.name} applied! Checkpoint: ${res.checkpointId}`;
-    } catch (err) {
-      codePreview.textContent = `❌ Apply Blocked: ${err.message}`;
-    }
-  });
-}
-
-// Enterprise AI Settings (BYOK) — session-only, never written to disk.
-// Keys live in the panel's JS memory (+ chrome.storage.session when available)
-// and are sent per-request to the loopback agent, which holds them only in
-// memory for that single upstream call.
+// ---- Enterprise AI Settings (BYOK) — session-only, never written to disk ----
 const AI_SESSION_KEY = "devbridge-ai-settings";
 let aiSettingsMemory = null;
 function readAiSettings() {
@@ -394,100 +109,266 @@ for (const el of [aiProvider, aiApiKey, aiModel, aiBaseUrl]) {
 }
 restoreAiSettings();
 
-// 5d. AI Visual Delta & Quick Fix (any configured provider proposes element replacement, staged as preview)
-if (btnAiFix) {
-  btnAiFix.addEventListener("click", async () => {
-    if (!currentRecord) return;
-    const providerLabel = aiProvider?.value || "gemini";
-    aiExplanation.textContent = `🤖 AI (${providerLabel}) is analyzing source & error context...`;
-    btnAiFix.disabled = true;
-    if (btnAiApply) btnAiApply.disabled = true;
-    pendingAiPatch = null;
-
-    try {
-      const suggestion = await agentFetch("/api/v1/ai/fix", {
-        method: "POST",
-        body: JSON.stringify({
-          devId: currentRecord.id,
-          latestTrace: latestBackendTrace,
-          aiConfig: currentAiConfig(),
-        }),
-      });
-
-      if (!suggestion.replacement) throw new Error("AI returned no replacement.");
-      pendingAiPatch = {
-        start: suggestion.start || currentRecord.start,
-        end: suggestion.end || currentRecord.end,
-        replacement: suggestion.replacement,
-      };
-
-      aiExplanation.textContent = `💡 ${suggestion.explanation || "Suggested AI Fix"}`;
-
-      // Stage as a reviewable unified diff over the element range
-      const res = await agentFetch("/api/v1/patches/preview", {
-        method: "POST",
-        body: JSON.stringify({
-          file: currentRecord.file,
-          originalHash: currentFileHash,
-          start: pendingAiPatch.start,
-          end: pendingAiPatch.end,
-          replacement: pendingAiPatch.replacement,
-        }),
-      });
-      codePreview.textContent = res.unifiedDiff;
-      if (btnAiApply) btnAiApply.disabled = false;
-    } catch (err) {
-      aiExplanation.textContent = `❌ AI Error: ${err.message}`;
-      pendingAiPatch = null;
-    } finally {
-      btnAiFix.disabled = false;
-    }
-  });
-}
-
-// 5e. Apply the staged AI patch (kept separate: AI replaces the whole element,
-// while Apply Atomic Patch replaces only className)
-if (btnAiApply) {
-  btnAiApply.addEventListener("click", async () => {
-    if (!currentRecord || !pendingAiPatch) return;
-    btnAiApply.disabled = true;
-    try {
-      const res = await agentFetch("/api/v1/patches/apply", {
-        method: "POST",
-        body: JSON.stringify({
-          file: currentRecord.file,
-          originalHash: currentFileHash,
-          start: pendingAiPatch.start,
-          end: pendingAiPatch.end,
-          replacement: pendingAiPatch.replacement,
-        }),
-      });
-      currentFileHash = res.newHash;
-      // Simplest safe invalidation: require re-inspect after an element-level AI
-      // patch since all tracked AST ranges may have shifted.
-      aiExplanation.textContent += ` ✅ Applied! Checkpoint: ${res.checkpointId} — please re-inspect to continue editing.`;
-      codePreview.textContent = `✅ AI patch applied! Checkpoint: ${res.checkpointId}`;
-      pendingAiPatch = null;
-    } catch (err) {
-      codePreview.textContent = `❌ Apply Blocked: ${err.message}`;
-      btnAiApply.disabled = false;
-    }
-  });
-}
-
-// 6. Rollback Last Patch
-btnRollback.addEventListener("click", async () => {
+// ---- Component Tree + Checkpoints ----
+async function loadComponentTree() {
   try {
-    const res = await agentFetch("/api/v1/patches/rollback", { method: "POST" });
+    const data = await agentFetch("/api/v1/identities");
+    agentStatus.textContent = "🟢 Connected";
+    agentStatus.className = "pill online";
+    renderComponentTree(data.records || []);
+    renderCheckpoints(data.checkpoints || []);
+  } catch {
+    agentStatus.textContent = "🔴 Offline";
+    agentStatus.className = "pill offline";
+  }
+}
+
+function renderComponentTree(records) {
+  if (!records.length) {
+    componentTree.innerHTML = `<div style="color:var(--text-muted);">No elements found. Hard refresh page.</div>`;
+    return;
+  }
+  const byId = new Map(records.map((r) => [r.id, r]));
+  const childrenOf = new Map();
+  const roots = [];
+  for (const r of records) {
+    if (r.parentId && byId.has(r.parentId)) {
+      if (!childrenOf.has(r.parentId)) childrenOf.set(r.parentId, []);
+      childrenOf.get(r.parentId).push(r);
+    } else {
+      roots.push(r);
+    }
+  }
+  const sortByLine = (a, b) => a.start.line - b.start.line || a.start.column - b.start.column;
+  roots.sort(sortByLine);
+  for (const kids of childrenOf.values()) kids.sort(sortByLine);
+
+  componentTree.innerHTML = "";
+  const buildItem = (rec) => {
+    const item = document.createElement("div");
+    item.className = "tree-item" + (currentRecord?.id === rec.id ? " active" : "");
+    item.innerHTML = `<span>&lt;${rec.componentName}&gt; <strong style="color:#60a5fa">${rec.tagName}</strong></span><span style="color:#64748b">:${rec.start.line}</span>`;
+    item.title = `${rec.file}:${rec.start.line}:${rec.start.column} (${rec.id})`;
+    item.onclick = () => selectIdentity(rec.id, null, []);
+    return item;
+  };
+  const appendSubtree = (container, rec) => {
+    container.appendChild(buildItem(rec));
+    const kids = childrenOf.get(rec.id);
+    if (kids?.length) {
+      const wrap = document.createElement("div");
+      wrap.className = "tree-children";
+      wrap.style.marginLeft = "12px";
+      wrap.style.borderLeft = "1px solid var(--border)";
+      wrap.style.paddingLeft = "4px";
+      for (const k of kids) appendSubtree(wrap, k);
+      container.appendChild(wrap);
+    }
+  };
+  for (const r of roots) appendSubtree(componentTree, r);
+}
+
+function renderCheckpoints(checkpoints) {
+  if (!checkpoints.length) {
+    checkpointList.textContent = "No edits yet.";
+    return;
+  }
+  checkpointList.innerHTML = checkpoints
+    .map(
+      (c) =>
+        `<div><code>${String(c.id).slice(0, 12)}</code> • ${c.file}${
+          c.verifiedGreen ? ' <span style="color:#4ade80">✔ Green</span>' : ""
+        }</div>`
+    )
+    .join("");
+}
+
+function renderA11yIssues(issues) {
+  currentA11yIssues = issues || [];
+  if (!currentA11yIssues.length) {
+    a11yAlerts.innerHTML = "";
+    return;
+  }
+  a11yAlerts.innerHTML = `<div class="a11y-box"><strong>♿ Accessibility Warnings (${currentA11yIssues.length}):</strong><br>${currentA11yIssues.join("<br>")}</div>`;
+}
+
+function renderFiberInspector() {
+  if (!currentRuntime) {
+    propsPreview.textContent = "// Inspect an element to see its live runtime props/state...";
+    return;
+  }
+  const lines = [];
+  if (currentRuntime.fiberComponent) lines.push(`Component (fiber): ${currentRuntime.fiberComponent}`);
+  lines.push(`Instances in DOM: ${currentRuntime.instanceCount ?? 1}`);
+  lines.push(`Props: ${JSON.stringify(currentRuntime.fiberProps ?? "(no fiber — static DOM node)", null, 2)}`);
+  lines.push(`State/Hooks: ${JSON.stringify(currentRuntime.fiberState ?? "(no hooks/class state)", null, 2)}`);
+  propsPreview.textContent = lines.join("\n");
+}
+
+// Smart detection: className (static or cn/clsx) > text > static prop.
+function detectEditMode() {
+  if (currentRecord?.classNameRange) return "className";
+  if (currentRecord?.textRange) return "text";
+  if ((currentRecord?.stringProps || []).length > 0) return "prop";
+  return null;
+}
+
+function currentSurgicalRange() {
+  if (editMode === "className") return currentRecord?.classNameRange || null;
+  if (editMode === "text") return currentRecord?.textRange || null;
+  if (editMode === "prop") {
+    return currentRecord?.stringProps?.[Number(selectProp.value)] || null;
+  }
+  return null;
+}
+
+function replacementForMode() {
+  if (editMode === "className") return `"${inputUniversal.value}"`;
+  if (editMode === "prop") return `"${inputUniversal.value}"`;
+  return inputUniversal.value;
+}
+
+function refreshEditorForMode() {
+  const props = currentRecord?.stringProps || [];
+  const showPropSelect = editMode === "prop" && props.length > 0;
+  selectProp.style.display = showPropSelect ? "" : "none";
+  if (showPropSelect) {
+    selectProp.innerHTML = "";
+    props.forEach((p, i) => {
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = `${p.name}="${p.rawValue}"`;
+      selectProp.appendChild(opt);
+    });
+    selectProp.disabled = false;
+    inputUniversal.value = props[0].rawValue;
+  }
+  if (editMode === "className") {
+    editLabel.textContent = "Surgical Tailwind / ClassName Editor:";
+    editTypeBadge.textContent = "CSS Class";
+    inputUniversal.disabled = false;
+    inputUniversal.value = currentRecord.classNameRange.rawValue;
+  } else if (editMode === "text") {
+    editLabel.textContent = "Surgical Text Editor:";
+    editTypeBadge.textContent = "Element Text";
+    inputUniversal.disabled = false;
+    inputUniversal.value = currentRecord.textRange.rawValue;
+  } else if (editMode === "prop") {
+    editLabel.textContent = "Static Prop Editor:";
+    const p = props[Number(selectProp.value) || 0];
+    editTypeBadge.textContent = p ? `Prop: ${p.name}` : "Prop";
+    inputUniversal.disabled = props.length === 0;
+    if (!showPropSelect) {
+      selectProp.innerHTML = `<option value="">(No static string props)</option>`;
+      inputUniversal.value = "";
+      inputUniversal.placeholder = "No editable strings on this element...";
+    }
+  } else {
+    editLabel.textContent = "Live Editor (Class / Text):";
+    editTypeBadge.textContent = "—";
+    inputUniversal.disabled = true;
+    inputUniversal.value = "";
+    inputUniversal.placeholder = "No editable static strings on this element...";
+  }
+  const canEdit = !!editMode;
+  btnPreview.disabled = !canEdit;
+  btnApply.disabled = !canEdit;
+}
+
+if (selectProp) {
+  selectProp.addEventListener("change", () => {
+    if (editMode !== "prop") return;
+    const props = currentRecord?.stringProps || [];
+    const p = props[Number(selectProp.value)];
+    if (p) {
+      inputUniversal.value = p.rawValue;
+      editTypeBadge.textContent = `Prop: ${p.name}`;
+    }
+    // Switching prop target invalidates any staged AI patch
     pendingAiPatch = null;
+    stagedKind = "surgical";
     if (btnAiApply) btnAiApply.disabled = true;
-    codePreview.textContent = `Rolled back ${res.rolledBack.file} to checkpoint ${res.rolledBack.id}`;
+  });
+}
+
+async function selectIdentity(devId, runtime = null, a11y = []) {
+  try {
+    const data = await agentFetch(`/api/v1/identity/${devId}`);
+    currentRecord = data.record;
+    currentFileHash = data.hash;
+    pendingAiPatch = null;
+    stagedKind = "surgical";
+    if (runtime) {
+      currentRuntime = {
+        fiberProps: runtime.fiberProps ?? null,
+        fiberState: runtime.fiberState ?? null,
+        fiberComponent: runtime.fiberComponent ?? null,
+        instanceCount: runtime.instanceCount ?? 1,
+        innerText: runtime.innerText ?? "",
+      };
+    } else {
+      currentRuntime = null;
+    }
+    renderA11yIssues(a11y);
+
+    inspectorTitle.textContent = `<${currentRecord.componentName}> (${currentRecord.tagName})`;
+    inspectorFile.textContent = `${currentRecord.file}:${currentRecord.start.line}:${currentRecord.start.column}`;
+    if (instanceMeta) {
+      const n = currentRuntime?.instanceCount;
+      instanceMeta.textContent =
+        n == null ? "" : n > 1 ? `${n} instances of ${currentRecord.id} in DOM` : `1 instance in DOM`;
+    }
+    codePreview.textContent = data.snippet;
+
+    btnOpenFront.disabled = false;
+    btnLocate.disabled = false;
+    btnAiFix.disabled = false;
+    if (btnLocate && currentRuntime) {
+      const n = currentRuntime.instanceCount ?? 1;
+      btnLocate.textContent = n > 1 ? `Locate in DOM (${n})` : `Locate in DOM`;
+    }
+    if (btnAiApply) btnAiApply.disabled = true;
+    if (aiExplanation) aiExplanation.textContent = "";
+
+    editMode = detectEditMode();
+    refreshEditorForMode();
+    renderFiberInspector();
+    loadComponentTree();
   } catch (err) {
-    codePreview.textContent = `Rollback Error: ${err.message}`;
+    inspectorTitle.textContent = `Error: ${err.message}`;
+  }
+}
+
+// Button Handlers
+btnInspect.addEventListener("click", () => {
+  inspectEnabled = !inspectEnabled;
+  btnInspect.textContent = inspectEnabled ? "Cancel Inspect" : "Inspect Element";
+  port.postMessage({ type: "TOGGLE_INSPECT", tabId, enabled: inspectEnabled });
+});
+
+btnLocate.addEventListener("click", () => {
+  if (!currentRecord) return;
+  const devId = currentRecord.id;
+  try {
+    chrome.tabs.sendMessage(tabId, { type: "LOCATE_DEV_ID", devId }, (res) => {
+      if (chrome.runtime.lastError) {
+        port.postMessage({ type: "LOCATE_IN_DOM", tabId, devId });
+        return;
+      }
+      if (res) {
+        btnLocate.textContent = `Locate in DOM (${res.count || 0})`;
+        if (res.a11yIssues) renderA11yIssues(res.a11yIssues);
+        if (instanceMeta && typeof res.count === "number") {
+          instanceMeta.textContent =
+            res.count > 1 ? `${res.count} instances in DOM — all flashed` : `1 instance in DOM`;
+        }
+      }
+    });
+  } catch {
+    port.postMessage({ type: "LOCATE_IN_DOM", tabId, devId });
   }
 });
 
-// 7. Open Frontend in Cursor / VS Code
 btnOpenFront.addEventListener("click", async () => {
   if (!currentRecord) return;
   await agentFetch("/api/v1/ide/open", {
@@ -502,17 +383,246 @@ btnOpenFront.addEventListener("click", async () => {
   });
 });
 
-// 8. Real-time WebSocket Listener for Correlated Backend Crashes
-const ws = new WebSocket("ws://127.0.0.1:4321");
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  if (data.type === "BACKEND_TRACE") {
-    latestBackendTrace = data.trace;
-    renderBackendTrace(data.trace);
+// Unified live preview: classes and text both preview in the DOM while typing
+inputUniversal.addEventListener("input", () => {
+  if (!currentRecord || !editMode) return;
+  // Typing a manual edit invalidates any staged AI patch
+  pendingAiPatch = null;
+  stagedKind = "surgical";
+  if (btnAiApply) btnAiApply.disabled = true;
+  if (editMode === "className") {
+    port.postMessage({ type: "LIVE_PREVIEW_CLASSES", tabId, devId: currentRecord.id, className: inputUniversal.value });
+  } else if (editMode === "text") {
+    port.postMessage({ type: "LIVE_PREVIEW_TEXT", tabId, devId: currentRecord.id, text: inputUniversal.value });
   }
-};
+});
 
-function renderBackendTrace(t) {
+btnPreview.addEventListener("click", async () => {
+  const range = currentSurgicalRange();
+  if (!currentRecord || !range) return;
+  stagedKind = "surgical";
+  try {
+    const res = await agentFetch("/api/v1/patches/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        file: currentRecord.file,
+        originalHash: currentFileHash,
+        start: range.start,
+        end: range.end,
+        replacement: replacementForMode(),
+      }),
+    });
+    codePreview.textContent = res.unifiedDiff;
+  } catch (err) {
+    codePreview.textContent = `❌ Diff / AST Validation Blocked: ${err.message}`;
+  }
+});
+
+async function doApplyStaged() {
+  if (!currentRecord) return;
+  // AI element patch takes precedence when one is staged
+  if (stagedKind === "ai" && pendingAiPatch) {
+    btnAiApply.disabled = true;
+    btnApply.disabled = true;
+    try {
+      const res = await agentFetch("/api/v1/patches/apply", {
+        method: "POST",
+        body: JSON.stringify({
+          file: currentRecord.file,
+          originalHash: currentFileHash,
+          start: pendingAiPatch.start,
+          end: pendingAiPatch.end,
+          replacement: pendingAiPatch.replacement,
+        }),
+      });
+      currentFileHash = res.newHash;
+      lastCheckpointId = res.checkpointId;
+      pendingAiPatch = null;
+      stagedKind = "surgical";
+      codePreview.textContent = `✅ AI patch applied & AST-verified! Checkpoint: ${res.checkpointId}\nClick "tsc Check" to mark this checkpoint Green — then re-inspect to continue editing.`;
+      if (aiExplanation) aiExplanation.textContent += ` ✅ Applied! Checkpoint: ${res.checkpointId}`;
+      loadComponentTree();
+    } catch (err) {
+      codePreview.textContent = `❌ Apply Failed: ${err.message}`;
+      btnAiApply.disabled = false;
+      btnApply.disabled = false;
+    }
+    return;
+  }
+  const range = currentSurgicalRange();
+  if (!range) return;
+  const replacement = replacementForMode();
+  try {
+    const res = await agentFetch("/api/v1/patches/apply", {
+      method: "POST",
+      body: JSON.stringify({
+        file: currentRecord.file,
+        originalHash: currentFileHash,
+        start: range.start,
+        end: range.end,
+        replacement,
+      }),
+    });
+    currentFileHash = res.newHash;
+    lastCheckpointId = res.checkpointId;
+    // Refresh end.column so consecutive edits work without re-inspecting
+    range.end = { line: range.start.line, column: range.start.column + replacement.length };
+    if (editMode === "className" && currentRecord.classNameRange) {
+      currentRecord.classNameRange.rawValue = inputUniversal.value;
+    } else if (editMode === "text" && currentRecord.textRange) {
+      currentRecord.textRange.rawValue = inputUniversal.value;
+    } else if (editMode === "prop") {
+      const p = currentRecord?.stringProps?.[Number(selectProp.value)];
+      if (p) {
+        p.rawValue = inputUniversal.value;
+        const opt = selectProp.options[Number(selectProp.value)];
+        if (opt) opt.textContent = `${p.name}="${p.rawValue}"`;
+        editTypeBadge.textContent = `Prop: ${p.name}`;
+      }
+    }
+    codePreview.textContent = `✅ Applied & AST-verified! Checkpoint: ${res.checkpointId}\nClick "tsc Check" to mark this checkpoint Green.`;
+    loadComponentTree();
+  } catch (err) {
+    codePreview.textContent = `❌ Apply Failed: ${err.message}`;
+  }
+}
+
+btnApply.addEventListener("click", doApplyStaged);
+if (btnAiApply) btnAiApply.addEventListener("click", doApplyStaged);
+
+btnRollback.addEventListener("click", async () => {
+  try {
+    const res = await agentFetch("/api/v1/patches/rollback", { method: "POST" });
+    pendingAiPatch = null;
+    stagedKind = "surgical";
+    if (btnAiApply) btnAiApply.disabled = true;
+    codePreview.textContent = `⏪ Rolled back file: ${res.rolledBack.file}`;
+    loadComponentTree();
+    if (currentRecord) selectIdentity(currentRecord.id, currentRuntime, currentA11yIssues);
+  } catch (err) {
+    codePreview.textContent = `Rollback error: ${err.message}`;
+  }
+});
+
+btnAiFix.addEventListener("click", async () => {
+  if (!currentRecord) return;
+  const providerLabel = aiProvider?.value || "gemini";
+  aiExplanation.textContent = `🤖 AI (${providerLabel}) is analyzing AST source, A11y warnings, and backend traces...`;
+  btnAiFix.disabled = true;
+  if (btnAiApply) btnAiApply.disabled = true;
+  pendingAiPatch = null;
+
+  try {
+    const suggestion = await agentFetch("/api/v1/ai/fix", {
+      method: "POST",
+      body: JSON.stringify({
+        devId: currentRecord.id,
+        latestTrace: latestBackendTrace,
+        a11yIssues: currentA11yIssues,
+        aiConfig: currentAiConfig(),
+      }),
+    });
+    if (!suggestion.replacement) throw new Error("AI returned no replacement.");
+    pendingAiPatch = {
+      start: suggestion.start || currentRecord.start,
+      end: suggestion.end || currentRecord.end,
+      replacement: suggestion.replacement,
+    };
+    stagedKind = "ai";
+    aiExplanation.textContent = `💡 ${suggestion.explanation || "Suggested AI Fix"}`;
+    // Stage as a reviewable unified diff over the element range (AST-validated)
+    const res = await agentFetch("/api/v1/patches/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        file: currentRecord.file,
+        originalHash: currentFileHash,
+        start: pendingAiPatch.start,
+        end: pendingAiPatch.end,
+        replacement: pendingAiPatch.replacement,
+      }),
+    });
+    codePreview.textContent = res.unifiedDiff;
+    if (btnAiApply) btnAiApply.disabled = false;
+  } catch (err) {
+    aiExplanation.textContent = `❌ AI Error: ${err.message}`;
+    pendingAiPatch = null;
+    stagedKind = "surgical";
+  } finally {
+    btnAiFix.disabled = false;
+  }
+});
+
+// Port & WS Listeners
+port.onMessage.addListener((msg) => {
+  if (msg.type === "INSTANCES_FLASHED") {
+    if (instanceMeta && msg.devId === currentRecord?.id) {
+      instanceMeta.textContent =
+        msg.count <= 1 ? `1 instance in DOM` : `${msg.count} instances in DOM — all flashed`;
+    }
+    if (msg.devId === currentRecord?.id) btnLocate.textContent = `Locate in DOM (${msg.count || 0})`;
+    return;
+  }
+  if (msg.type !== "ELEMENT_SELECTED") return;
+  inspectEnabled = false;
+  btnInspect.textContent = "Inspect Element";
+  selectIdentity(
+    msg.devId,
+    {
+      fiberProps: msg.fiberProps,
+      fiberState: msg.fiberState,
+      fiberComponent: msg.fiberComponent,
+      instanceCount: msg.instanceCount,
+      innerText: msg.innerText,
+    },
+    msg.a11yIssues || []
+  );
+});
+
+function connectWS() {
+  let ws;
+  try {
+    ws = new WebSocket("ws://127.0.0.1:4321");
+  } catch {
+    agentStatus.textContent = "🔴 Offline";
+    agentStatus.className = "pill offline";
+    setTimeout(connectWS, 3000);
+    return;
+  }
+  ws.onopen = () => loadComponentTree();
+  ws.onclose = () => {
+    agentStatus.textContent = "🔴 Offline";
+    agentStatus.className = "pill offline";
+    setTimeout(connectWS, 3000);
+  };
+  ws.onerror = () => {
+    try {
+      ws.close();
+    } catch {}
+  };
+  ws.onmessage = (event) => {
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (data.type === "BACKEND_TRACE") {
+      latestBackendTrace = data.trace;
+      renderTrace(data.trace);
+    } else if (data.type === "IDENTITIES_UPDATED") {
+      loadComponentTree();
+      if (currentRecord && (!data.file || data.file === currentRecord.file)) {
+        selectIdentity(currentRecord.id, currentRuntime, currentA11yIssues);
+      }
+    } else if (data.type === "PATCH_APPLIED" || data.type === "PATCH_ROLLED_BACK") {
+      loadComponentTree();
+    }
+  };
+}
+connectWS();
+loadComponentTree();
+
+function renderTrace(t) {
   const div = document.createElement("div");
   div.className = "trace-box";
   div.innerHTML = `
@@ -541,8 +651,52 @@ function renderBackendTrace(t) {
   tracesContainer.prepend(div);
 }
 
-// 9. Copy Full-Stack Bug Context Bundle for Cursor AI
-btnCopyAi.addEventListener("click", () => {
+document.getElementById("btn-sync").onclick = loadComponentTree;
+document.getElementById("btn-git").onclick = async () => {
+  try {
+    const res = await agentFetch("/api/v1/git/status");
+    codePreview.textContent = [`🌿 Branch: ${res.branch}`, `📋 Status:\n${res.status}`, `\n--- Working Tree Git Diff ---\n${res.diff}`].join("\n");
+    renderCheckpoints(res.checkpoints || []);
+  } catch (err) {
+    codePreview.textContent = `Git Error: ${err.message}`;
+  }
+};
+document.getElementById("btn-tsc").onclick = async () => {
+  codePreview.textContent = "⏳ Running `tsc --noEmit` in FRONTEND_ROOT...";
+  try {
+    const res = await agentFetch("/api/v1/verify", {
+      method: "POST",
+      body: JSON.stringify({ checkpointId: lastCheckpointId }),
+    });
+    codePreview.textContent = res.output;
+    loadComponentTree();
+  } catch (err) {
+    codePreview.textContent = `Verification Error: ${err.message}`;
+  }
+};
+document.getElementById("btn-a11y").onclick = () => {
+  codePreview.textContent = "♿ Scanning page accessibility on mapped elements...";
+  try {
+    chrome.tabs.sendMessage(tabId, { type: "SCAN_PAGE_A11Y" }, (res) => {
+      if (chrome.runtime.lastError) {
+        codePreview.textContent = `A11y scan unavailable: ${chrome.runtime.lastError.message}`;
+        return;
+      }
+      if (!res?.report?.length) {
+        codePreview.textContent = "✅ Page Accessibility Scan: 0 issues detected on mapped elements!";
+        return;
+      }
+      codePreview.textContent =
+        `♿ Page Accessibility Audit (${res.report.length} elements with warnings):\n\n` +
+        res.report.map((r) => `[${r.devId}] <${r.tagName}>:\n  - ${r.issues.join("\n  - ")}`).join("\n\n");
+    });
+  } catch (err) {
+    codePreview.textContent = `A11y scan unavailable: ${err.message}`;
+  }
+};
+
+// 14. Copy Full-Stack Bug Context Bundle for Cursor AI
+btnCopyBundle.addEventListener("click", () => {
   const markdown = [
     `## DevBridge Full-Stack Bug Context`,
     currentRecord
@@ -550,11 +704,14 @@ btnCopyAi.addEventListener("click", () => {
           currentRecord.componentName
         }>\` at \`${currentRecord.file}:${currentRecord.start.line}:${currentRecord.start.column}\` (ID: \`${currentRecord.id}\`)`
       : `- **Frontend Component:** None selected`,
-    currentRecord?.classNameRange
+    editMode === "className" && currentRecord?.classNameRange
       ? `- **className:** \`${currentRecord.classNameRange.rawValue}\``
       : null,
-    currentRecord?.textRange
+    editMode === "text" && currentRecord?.textRange
       ? `- **innerText:** \`${currentRecord.textRange.rawValue}\``
+      : null,
+    currentA11yIssues.length
+      ? `- **Accessibility Warnings:**\n  - ${currentA11yIssues.join("\n  - ")}`
       : null,
     currentRuntime
       ? [
@@ -576,6 +733,6 @@ btnCopyAi.addEventListener("click", () => {
     .join("\n");
 
   navigator.clipboard.writeText(markdown);
-  btnCopyAi.textContent = "Copied Markdown Bundle!";
-  setTimeout(() => (btnCopyAi.textContent = "Copy Full-Stack Bug Bundle for Cursor AI"), 1500);
+  btnCopyBundle.textContent = "✅ Copied Bundle!";
+  setTimeout(() => (btnCopyBundle.textContent = "Copy Cursor Bundle"), 1500);
 });
