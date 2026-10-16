@@ -19,7 +19,21 @@ export class SecurityManager {
       throw new Error('UNAUTHORIZED: Invalid or missing X-DevBridge-Token');
     }
 
-    const origin = req.headers['origin'];
+    this.verifyOrigin(req.headers['origin']);
+  }
+
+  public verifyWebSocket(token: string | null | undefined, origin?: string): void {
+    if (token !== this.secretToken) {
+      throw new Error('UNAUTHORIZED: Invalid or missing DevBridge WebSocket token');
+    }
+    this.verifyOrigin(origin);
+  }
+
+  public verifyWebSocketOrigin(origin?: string): void {
+    this.verifyOrigin(origin);
+  }
+
+  private verifyOrigin(origin?: string): void {
     if (
       origin &&
       !origin.startsWith('chrome-extension://') &&

@@ -13,6 +13,7 @@ export interface DevIdentityRecord {
   parentId?: string;          // Nearest ancestor JSX data-dev-id (for Component Tree nesting)
   classNameRange?: {          // Exact AST range of className="..." for surgical Tailwind edits
     rawValue: string;
+    syntax?: 'quoted' | 'template';
     start: SourcePosition;
     end: SourcePosition;
   };

@@ -38,6 +38,12 @@ describe('DevBridge SecurityManager & Atomic PatchEngine', () => {
     expect(() => security.verifyRequest(fakeReq)).toThrow(/UNAUTHORIZED/);
   });
 
+  it('requires the same token for authenticated WebSocket origins', () => {
+    expect(() => security.verifyWebSocket('test-secret', 'chrome-extension://devbridge')).not.toThrow();
+    expect(() => security.verifyWebSocket('wrong-token', 'chrome-extension://devbridge')).toThrow(/UNAUTHORIZED/);
+    expect(() => security.verifyWebSocket('test-secret', 'https://example.com')).toThrow(/FORBIDDEN_ORIGIN/);
+  });
+
   it('applies an atomic patch when hash matches and rolls back cleanly', () => {
     const { hash } = patchEngine.readSourceFile(sampleFileRel);
 
@@ -79,5 +85,30 @@ describe('DevBridge SecurityManager & Atomic PatchEngine', () => {
         replacement: '"bg-emerald-600"',
       })
     ).toThrow(/CONFLICT/);
+  });
+
+  it('rejects invalid source positions before writing', () => {
+    const { hash } = patchEngine.readSourceFile(sampleFileRel);
+    expect(() => patchEngine.previewDiff({
+      file: sampleFileRel,
+      originalHash: hash,
+      start: { line: 1, column: 999 },
+      end: { line: 1, column: 1000 },
+      replacement: 'x',
+    })).toThrow(/INVALID_POSITION/);
+  });
+
+  it('refuses rollback when the file changed after the checkpoint', () => {
+    const { hash } = patchEngine.readSourceFile(sampleFileRel);
+    patchEngine.applyAtomicPatch({
+      file: sampleFileRel,
+      originalHash: hash,
+      start: { line: 1, column: 18 },
+      end: { line: 1, column: 31 },
+      replacement: '"bg-emerald-600"',
+    });
+    fs.writeFileSync(path.join(tmpDir, sampleFileRel), 'external change\n', 'utf8');
+    expect(() => patchEngine.rollbackLastCheckpoint()).toThrow(/CONFLICT/);
+    expect(patchEngine.getCheckpoints()).toHaveLength(1);
   });
 });

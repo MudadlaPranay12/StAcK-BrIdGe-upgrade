@@ -6,6 +6,7 @@
     "build": "pnpm -r build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "extension:check": "node scripts/validate-extension.mjs",
     "agent": "pnpm --filter @devbridge/local-agent start",
     "demo:api": "pnpm --filter @devbridge/full-stack-demo dev:api",
     "demo:web": "pnpm --filter @devbridge/full-stack-demo dev:web"

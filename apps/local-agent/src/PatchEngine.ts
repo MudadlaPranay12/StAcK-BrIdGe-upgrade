@@ -9,6 +9,7 @@ export interface Checkpoint {
   id: string;
   file: string;
   previousContent: string;
+  postApplyHash: string;
   timestamp: string;
   verifiedGreen?: boolean;
 }
@@ -74,16 +75,26 @@ export class PatchEngine {
 
   // Exact CRLF / LF safe line:column -> string index resolver
   private positionToOffset(content: string, pos: SourcePosition): number {
-    let currentLine = 1;
-    let index = 0;
-
-    while (currentLine < pos.line && index < content.length) {
-      if (content[index] === '\n') {
-        currentLine++;
-      }
-      index++;
+    if (!pos || !Number.isInteger(pos.line) || !Number.isInteger(pos.column) || pos.line < 1 || pos.column < 0) {
+      const err: any = new Error('INVALID_POSITION: line must be >= 1 and column must be >= 0');
+      err.statusCode = 422;
+      throw err;
     }
-    return index + pos.column;
+    const lines = content.split('\n');
+    if (pos.line > lines.length) {
+      const err: any = new Error(`INVALID_POSITION: line ${pos.line} is outside the file`);
+      err.statusCode = 422;
+      throw err;
+    }
+    const line = lines[pos.line - 1].replace(/\r$/, '');
+    if (pos.column > line.length) {
+      const err: any = new Error(`INVALID_POSITION: column ${pos.column} is outside line ${pos.line}`);
+      err.statusCode = 422;
+      throw err;
+    }
+    let offset = 0;
+    for (let i = 0; i < pos.line - 1; i++) offset += lines[i].length + 1;
+    return offset + pos.column;
   }
 
   // Validates that patched TSX/JSX code has zero syntax errors before touching disk
@@ -104,6 +115,11 @@ export class PatchEngine {
   }
 
   public previewDiff(req: StagedPatchRequest): { nextContent: string; unifiedDiff: string } {
+    if (!req || typeof req.file !== 'string' || typeof req.originalHash !== 'string' || typeof req.replacement !== 'string') {
+      const err: any = new Error('INVALID_PATCH: file, originalHash, and replacement are required');
+      err.statusCode = 422;
+      throw err;
+    }
     const { content, hash } = this.readSourceFile(req.file);
     if (hash !== req.originalHash) {
       const err: any = new Error('CONFLICT: File was modified externally in IDE since inspection.');
@@ -113,6 +129,11 @@ export class PatchEngine {
 
     const startOffset = this.positionToOffset(content, req.start);
     const endOffset = this.positionToOffset(content, req.end);
+    if (endOffset < startOffset) {
+      const err: any = new Error('INVALID_POSITION: end must not precede start');
+      err.statusCode = 422;
+      throw err;
+    }
     const nextContent = content.slice(0, startOffset) + req.replacement + content.slice(endOffset);
 
     // Pre-verify AST syntax even on preview so bad AI/manual patches fail fast
@@ -145,33 +166,66 @@ export class PatchEngine {
     const { nextContent } = this.previewDiff(req);
 
     // Save rollback checkpoint (memory + disk so history survives restarts)
-    const checkpointId = `chk_${Date.now()}`;
-    this.checkpoints.push({
+    const checkpointId = `chk_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const newHash = this.computeHash(nextContent);
+    const checkpoint: Checkpoint = {
       id: checkpointId,
       file: req.file,
       previousContent: currentContent,
+      postApplyHash: newHash,
       timestamp: new Date().toISOString(),
-    });
-    this.saveCheckpointsToDisk();
+    };
 
     // Atomic Write: write to temp file in same directory, then rename
-    const tempPath = path.join(path.dirname(fullPath), `.${path.basename(fullPath)}.devbridge.tmp`);
-    fs.writeFileSync(tempPath, nextContent, 'utf8');
-    fs.renameSync(tempPath, fullPath);
+    const tempPath = path.join(
+      path.dirname(fullPath),
+      `.${path.basename(fullPath)}.${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString('hex')}.devbridge.tmp`
+    );
+    try {
+      fs.writeFileSync(tempPath, nextContent, 'utf8');
+      fs.renameSync(tempPath, fullPath);
+      this.checkpoints.push(checkpoint);
+      this.saveCheckpointsToDisk();
+    } finally {
+      try {
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      } catch {
+        // Best-effort cleanup; the ignored temp file is never treated as a source file.
+      }
+    }
 
-    return { checkpointId, newHash: this.computeHash(nextContent) };
+    return { checkpointId, newHash };
   }
 
-  public rollbackLastCheckpoint(): Checkpoint {
-    const last = this.checkpoints.pop();
+  public rollbackLastCheckpoint(): Omit<Checkpoint, 'previousContent'> {
+    const last = this.checkpoints[this.checkpoints.length - 1];
     if (!last) {
       throw new Error('NO_CHECKPOINTS: Nothing to roll back');
     }
-    this.saveCheckpointsToDisk();
     const fullPath = this.security.assertPathInProject(last.file, 'frontend');
-    const tempPath = path.join(path.dirname(fullPath), `.${path.basename(fullPath)}.rollback.tmp`);
-    fs.writeFileSync(tempPath, last.previousContent, 'utf8');
-    fs.renameSync(tempPath, fullPath);
-    return last;
+    const currentContent = fs.readFileSync(fullPath, 'utf8');
+    if (!last.postApplyHash || this.computeHash(currentContent) !== last.postApplyHash) {
+      const err: any = new Error('CONFLICT: File changed after the checkpoint was applied; rollback was not performed.');
+      err.statusCode = 409;
+      throw err;
+    }
+    const tempPath = path.join(
+      path.dirname(fullPath),
+      `.${path.basename(fullPath)}.${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString('hex')}.rollback.tmp`
+    );
+    try {
+      fs.writeFileSync(tempPath, last.previousContent, 'utf8');
+      fs.renameSync(tempPath, fullPath);
+      this.checkpoints.pop();
+      this.saveCheckpointsToDisk();
+    } finally {
+      try {
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      } catch {
+        // Best-effort cleanup.
+      }
+    }
+    const { previousContent: _omitted, ...metadata } = last;
+    return metadata;
   }
 }

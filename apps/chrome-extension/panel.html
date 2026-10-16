@@ -1,174 +1,112 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DevBridge</title>
   <style>
-    :root {
-      --bg-main: #0f172a;
-      --bg-card: #1e293b;
-      --border: #334155;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --primary: #3b82f6;
-      --success: #16a34a;
-      --danger: #dc2626;
-      --warn: #d97706;
-      --accent: #38bdf8;
-    }
-    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg-main); color: var(--text); margin: 0; padding: 10px; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; gap: 8px; overflow: hidden; }
-
-    /* Top Header */
-    .header { display: flex; justify-content: space-between; align-items: center; background: var(--bg-card); padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); flex-wrap: wrap; gap: 6px; }
-    .logo { font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 6px; }
-    .logo span { font-weight: 400; font-size: 11px; color: var(--text-muted); }
-    .pill { font-size: 10px; padding: 2px 6px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
-    .pill.online { background: rgba(22,163,74,0.2); color: #4ade80; border: 1px solid #16a34a; }
-    .pill.offline { background: rgba(220,38,38,0.2); color: #f87171; border: 1px solid #dc2626; }
-
-    /* Main Grid Layout */
-    .grid { display: grid; grid-template-columns: 220px 1fr 1fr; gap: 8px; flex: 1; min-height: 0; }
-    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
-
-    h3 { margin: 4px 0; font-size: 11px; color: #93c5fd; text-transform: uppercase; letter-spacing: 0.5px; }
-
-    button { background: var(--primary); color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 500; margin-right: 4px; margin-bottom: 4px; }
-    button:disabled { opacity: 0.4; cursor: not-allowed; }
-    button.secondary { background: #475569; }
-    button.success { background: var(--success); }
-    button.danger { background: var(--danger); }
-    button.warn { background: var(--warn); }
-
-    input, select { width: 100%; padding: 6px; background: #0f172a; border: 1px solid #475569; color: #fff; border-radius: 4px; font-family: monospace; font-size: 11px; box-sizing: border-box; }
-
-    pre { background: #020617; padding: 8px; border-radius: 4px; overflow-x: auto; font-size: 11px; line-height: 1.4; border: 1px solid var(--border); margin: 0; font-family: ui-monospace, monospace; }
-    #code-preview { color: var(--accent); }
-
-    .tree-item { padding: 4px 6px; font-size: 11px; font-family: monospace; border-radius: 4px; cursor: pointer; color: #cbd5e1; display: flex; justify-content: space-between; gap: 6px; }
-    .tree-item:hover, .tree-item.active { background: #334155; color: #fff; }
-    .tree-children { margin-left: 12px; border-left: 1px solid var(--border); padding-left: 4px; }
-
-    .inspector-box { background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
-    .trace-box { border-left: 3px solid var(--danger); background: rgba(239,68,68,0.08); padding: 8px; border-radius: 4px; font-size: 11px; }
-    .a11y-box { border-left: 3px solid var(--warn); background: rgba(245,158,11,0.1); padding: 6px; border-radius: 4px; font-size: 11px; color: #fde68a; }
-    .mini { font-size: 10px; color: var(--text-muted); }
+    :root { color-scheme: dark; --bg:#16181d; --surface:#20242b; --surface-2:#292e36; --border:#3a414c; --text:#e7eaf0; --muted:#9ba4b2; --accent:#76a9fa; --good:#62c18b; --warn:#d9a441; --bad:#e57979; --focus:#b8d4ff; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-width:280px; height:100vh; overflow:hidden; background:var(--bg); color:var(--text); font:12px/1.4 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    button,input,select { font:inherit; }
+    button { color:var(--text); background:#303640; border:1px solid #4a5360; border-radius:4px; padding:6px 9px; cursor:pointer; }
+    button:hover:not(:disabled) { background:#3a4350; }
+    button.primary { background:#315d9a; border-color:#5282c4; }
+    button.success { background:#245d47; border-color:#408b69; }
+    button.danger { background:#6b3037; border-color:#a4545d; }
+    button:disabled { cursor:not-allowed; opacity:.48; }
+    button:focus-visible,input:focus-visible,select:focus-visible,[tabindex]:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
+    input,select { width:100%; color:var(--text); background:#171a20; border:1px solid var(--border); border-radius:4px; padding:7px 8px; }
+    .app-header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; border-bottom:1px solid var(--border); background:#1b1e24; }
+    .brand { font-size:13px; font-weight:650; letter-spacing:.01em; }
+    .status { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; color:var(--muted); }
+    .status::before { content:""; width:7px; height:7px; border-radius:50%; background:#79818d; }
+    .status.good { color:var(--good); }.status.good::before { background:var(--good); }.status.bad { color:var(--bad); }.status.bad::before { background:var(--bad); }.status.warn { color:var(--warn); }.status.warn::before { background:var(--warn); }
+    .tabs { display:flex; gap:2px; padding:6px 8px 0; overflow:auto; border-bottom:1px solid var(--border); background:#1b1e24; }
+    .tab { border:0; border-bottom:2px solid transparent; border-radius:0; padding:7px 8px; background:transparent; color:var(--muted); white-space:nowrap; }
+    .tab[aria-selected="true"] { color:var(--text); border-bottom-color:var(--accent); }
+    main { height:calc(100vh - 89px); overflow:auto; padding:10px; }
+    .tab-panel { display:none; }.tab-panel.active { display:block; }
+    .section { margin-bottom:10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); overflow:hidden; }
+    .section > h2,.section > summary { margin:0; padding:8px 10px; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#c5d3e8; border-bottom:1px solid var(--border); }
+    .section-body { padding:10px; }.grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }.stack { display:flex; flex-direction:column; gap:8px; }.row { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }.row > button { flex:1; }.label { color:var(--muted); font-size:11px; }.value { overflow-wrap:anywhere; }.muted { color:var(--muted); }.small { font-size:11px; }.mono,pre,code { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }.mono { overflow-wrap:anywhere; }
+    .metric { min-width:0; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--surface-2); }.metric .label { display:block; margin-bottom:2px; }.metric .value { display:block; }
+    .tree { min-height:100px; max-height:300px; overflow:auto; }.tree-item { display:flex; justify-content:space-between; gap:6px; padding:5px 6px; border-radius:4px; cursor:pointer; }.tree-item:hover,.tree-item.active { background:#333b47; }.tree-children { margin-left:10px; border-left:1px solid var(--border); padding-left:5px; }
+    .inspector { padding:9px; border:1px solid #46566e; border-radius:5px; background:#202b3a; }.inspector strong { color:#cfe0fb; }.pill { display:inline-block; border-radius:999px; padding:2px 6px; border:1px solid var(--border); color:var(--muted); font-size:10px; }
+    pre { white-space:pre-wrap; word-break:break-word; max-height:260px; overflow:auto; margin:0; padding:9px; color:#c7d5e9; background:#15181d; border:1px solid var(--border); border-radius:4px; }
+    .finding { padding:8px; border-left:3px solid var(--warn); background:#302b20; border-radius:3px; }.finding.error { border-left-color:var(--bad); background:#302326; }.finding.good { border-left-color:var(--good); background:#203027; }
+    .check { display:flex; justify-content:space-between; gap:8px; align-items:center; padding:7px 0; border-bottom:1px solid #343a43; }.check:last-child { border-bottom:0; }.state { color:var(--muted); }.state.good { color:var(--good); }.state.bad { color:var(--bad); }.state.warn { color:var(--warn); }
+    .modal { position:fixed; inset:0; display:none; align-items:center; justify-content:center; padding:14px; background:rgba(10,12,15,.84); z-index:4; }.modal.open { display:flex; }.modal-card { width:min(390px,100%); max-height:100%; overflow:auto; padding:12px; border:1px solid var(--border); border-radius:6px; background:var(--surface); box-shadow:0 8px 30px rgba(0,0,0,.35); }.modal-card h2 { margin:0 0 8px; font-size:13px; }.field { display:flex; flex-direction:column; gap:4px; margin-top:8px; }.notice { padding:7px 8px; border-radius:4px; background:#292d35; color:var(--muted); }.error-text { color:var(--bad); }.success-text { color:var(--good); }
   </style>
 </head>
 <body>
-  <div class="header">
-    <div class="logo">⚡ DevBridge <span>DOM ↔ AST ↔ Git ↔ Backend</span></div>
-    <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
-      <button id="btn-sync" class="secondary">Sync Tree</button>
-      <button id="btn-a11y" class="warn">Scan A11y</button>
-      <button id="btn-git" class="secondary">Git Diff</button>
-      <button id="btn-tsc" class="success">tsc Check</button>
-      <span id="agent-status" class="pill offline">🔴 Agent Offline</span>
+  <header class="app-header"><div class="brand">DevBridge</div><span id="agent-status" class="status bad" role="status" aria-live="polite">Agent not configured</span></header>
+  <nav class="tabs" role="tablist" aria-label="DevBridge sections">
+    <button class="tab" role="tab" aria-selected="true" aria-controls="overview-panel" data-tab="overview">Overview</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="inspector-panel" data-tab="inspector">Inspector</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="diagnostics-panel" data-tab="diagnostics">Diagnostics</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="changes-panel" data-tab="changes">Changes</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="ai-panel" data-tab="ai">AI</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="settings-panel" data-tab="settings">Settings</button>
+  </nav>
+  <main>
+    <section id="overview-panel" class="tab-panel active" role="tabpanel">
+      <div class="section"><h2>Overview</h2><div class="section-body stack">
+        <div class="grid"><div class="metric"><span class="label">Inspected website</span><span id="inspected-site" class="value">Reading tab…</span></div><div class="metric"><span class="label">URL</span><span id="inspected-url" class="value mono">—</span></div></div>
+        <div class="grid"><div class="metric"><span class="label">Project root</span><span id="project-root" class="value mono">—</span></div><div class="metric"><span class="label">Framework</span><span id="framework" class="value">Detecting…</span></div></div>
+        <div class="grid"><div class="metric"><span class="label">Extension/content script</span><span id="content-status" class="status warn">Not checked</span></div><div class="metric"><span class="label">Identity synchronization</span><span id="identity-status" class="status warn">Not checked</span></div></div>
+        <div class="grid"><div class="metric"><span class="label">Source mapping</span><span id="mapping-status" class="status warn">Not checked</span></div><div class="metric"><span class="label">Backend availability</span><span id="backend-availability" class="status warn">Not configured</span></div></div>
+        <div class="grid"><div class="metric"><span class="label">Backend traces</span><span id="trace-status" class="status warn">Not connected</span></div><div class="metric"><span class="label">Last synchronization</span><span id="last-sync" class="value">Never</span></div></div>
+        <div id="connection-message" class="notice" role="status">Set the agent URL and token in Settings, then run Sync Tree.</div>
+        <div class="row"><button id="btn-sync" class="primary">Sync tree</button><button id="btn-open-settings" type="button">Connection settings</button></div>
+      </div></div>
+      <div class="section"><h2>Component tree</h2><div class="section-body"><div id="component-tree" class="tree muted">No identities loaded.</div></div></div>
+    </section>
+
+    <section id="inspector-panel" class="tab-panel" role="tabpanel" hidden>
+      <div class="section"><h2>Element inspector</h2><div class="section-body stack">
+        <div class="row"><button id="btn-inspect" class="primary">Inspect element</button><button id="btn-locate" disabled>Locate in DOM</button></div>
+        <div class="inspector"><strong id="inspector-title">No element selected</strong><div id="inspector-file" class="small mono muted">Source mapping unavailable</div><div id="instance-meta" class="small muted"></div></div>
+        <div class="grid"><div class="metric"><span class="label">data-dev-id</span><span id="inspector-dev-id" class="value mono">—</span></div><div class="metric"><span class="label">DOM tag</span><span id="inspector-tag" class="value mono">—</span></div></div>
+        <div class="row"><button id="btn-open-front" disabled>Open source in IDE</button><button id="btn-copy-bundle">Copy Cursor bundle</button></div>
+        <label class="label" for="select-prop">Editable source value</label><select id="select-prop" style="display:none"><option value="">No static string props</option></select><input id="input-universal" placeholder="Select an element to edit…" disabled aria-label="Editable source value" />
+        <div class="row"><button id="btn-preview" disabled>Preview patch</button><button id="btn-apply" class="success" disabled>Apply patch</button><button id="btn-rollback" class="danger" disabled>Rollback</button></div>
+        <div id="edit-label" class="small muted">Select an element to see editable source ranges.</div><span id="edit-type-badge" class="pill">—</span>
+        <h3 class="label">Source and patch result</h3><pre id="code-preview">Select an element from the page or component tree.</pre>
+        <h3 class="label">Runtime props and state</h3><pre id="props-preview">Inspect an element to view runtime data.</pre>
+      </div></div>
+    </section>
+
+    <section id="diagnostics-panel" class="tab-panel" role="tabpanel" hidden>
+      <div class="section"><h2>Diagnostics</h2><div class="section-body stack">
+        <div class="check"><span>Accessibility scan</span><span id="a11y-state" class="state">Not run</span></div><div class="check"><span>Console and runtime errors</span><span id="issues-state" class="state">Not run</span></div><div class="check"><span>Network failures</span><span id="network-state" class="state">Not run</span></div><div class="check"><span>Backend traces and correlation IDs</span><span id="backend-state" class="state">Not connected</span></div>
+        <div class="row"><button id="btn-a11y">Scan mapped elements</button><button id="btn-issues">Inspect runtime issues</button></div><div id="a11y-alerts"></div><div id="runtime-findings" class="stack"></div>
+      </div></div>
+      <div class="section"><h2>Backend traces</h2><div class="section-body"><div id="traces-container" class="stack"><div class="muted">No backend trace received.</div></div></div></div>
+    </section>
+
+    <section id="changes-panel" class="tab-panel" role="tabpanel" hidden>
+      <div class="section"><h2>Git and changes</h2><div class="section-body stack"><div class="grid"><div class="metric"><span class="label">Checked directory</span><span id="git-directory" class="value mono">—</span></div><div class="metric"><span class="label">Repository root</span><span id="git-root" class="value mono">—</span></div></div><div id="git-state" class="notice">Git inspection has not run.</div><div class="row"><button id="btn-git">Inspect Git diff</button><button id="btn-tsc">Run typecheck</button></div><pre id="git-summary">Run Git inspection to see branch, files, and diff.</pre></div></div>
+      <div class="section"><h2>Checkpoints</h2><div class="section-body"><div id="checkpoint-list" class="muted">No edits yet.</div></div></div>
+    </section>
+
+    <section id="ai-panel" class="tab-panel" role="tabpanel"><div class="section"><h2>AI assistant</h2><div class="section-body stack"><div id="ai-settings-summary" class="notice">AI provider is not configured.</div><div class="notice">AI output is untrusted. Review the actual diff, validate it, and explicitly confirm before applying.</div><div class="row"><button id="btn-ai-fix" disabled>Generate proposed fix</button><button id="btn-ai-apply" class="success" disabled>Apply proposed fix</button></div><div id="ai-explanation" class="small"></div><pre id="ai-diff">No proposed change.</pre></div></div></section>
+
+    <section id="settings-panel" class="tab-panel" role="tabpanel"><div class="section"><h2>Settings</h2><div class="section-body stack"><div class="notice">Connection and AI settings are stored locally in this DevTools extension. Secrets are masked in the interface and are never logged.</div><div class="row"><button id="btn-settings-panel" type="button">Edit settings</button></div></div></div></section>
+  </main>
+
+  <div id="settings-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal-card"><h2 id="settings-title">DevBridge settings</h2><div id="settings-error" class="error-text small" role="alert"></div>
+      <div class="field"><label for="modal-agent-url">Agent endpoint</label><input id="modal-agent-url" value="http://127.0.0.1:4321" autocomplete="url" /></div>
+      <div class="field"><label for="modal-agent-token">Development token</label><input id="modal-agent-token" type="password" autocomplete="off" placeholder="Set DEVBRIDGE_TOKEN value" /></div>
+      <div class="field"><label for="modal-backend-url">Backend health endpoint (optional)</label><input id="modal-backend-url" placeholder="http://127.0.0.1:4000/api/health" autocomplete="url" /></div>
+      <div class="field"><label for="modal-ai-provider">AI provider</label><select id="modal-ai-provider"><option value="gemini">Google Gemini</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="openai-compatible">OpenAI-compatible gateway</option></select></div>
+      <div class="field"><label for="modal-ai-model">AI model</label><input id="modal-ai-model" placeholder="Provider default" autocomplete="off" /></div>
+      <div class="field"><label for="modal-ai-apikey">AI API key (optional for configured agent/local gateway)</label><input id="modal-ai-apikey" type="password" autocomplete="off" /></div>
+      <div class="field"><label for="modal-ai-baseurl">AI gateway URL</label><input id="modal-ai-baseurl" placeholder="Only for OpenAI-compatible provider" autocomplete="url" /></div>
+      <div class="row" style="margin-top:10px"><button id="btn-save-settings" class="success">Validate and save</button><button id="btn-close-settings">Close</button></div>
     </div>
   </div>
-
-  <div class="grid">
-    <!-- Col 1: Component Tree & Checkpoints -->
-    <div class="card">
-      <h3>Component Tree</h3>
-      <div id="component-tree" style="flex:1; overflow-y:auto; font-size:11px;">Click "Sync Tree" or reload page...</div>
-      <h3>Checkpoints</h3>
-      <div id="checkpoint-list" style="max-height:90px; overflow-y:auto; font-size:10px; color:var(--text-muted);">No edits yet.</div>
-    </div>
-
-    <!-- Col 2: Smart Unified Inspector & Surgical Editor -->
-    <div class="card">
-      <h3>Inspector &amp; Surgical Editor</h3>
-      <div style="display: flex; gap: 4px;">
-        <button id="btn-inspect" style="flex:1;">Inspect Element</button>
-        <button id="btn-locate" class="warn" style="flex:1;" disabled>Locate in DOM</button>
-        <button id="btn-rollback" class="danger">Rollback</button>
-      </div>
-
-      <!-- Smart Inspector Card -->
-      <div class="inspector-box">
-        <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px;">
-          <span id="inspector-title" style="font-size: 11px; font-weight: 600; color: #93c5fd;">No element selected</span>
-          <button id="btn-open-front" class="secondary" style="padding: 2px 6px; font-size: 10px; margin: 0;" disabled>Open in Cursor</button>
-        </div>
-        <div id="inspector-file" style="font-size: 10px; font-family: monospace; color: var(--text-muted);">—</div>
-        <div id="instance-meta" style="font-size: 10px; color: #6ee7b7;"></div>
-      </div>
-
-      <div id="a11y-alerts"></div>
-
-      <!-- Unified Edit Field (adapts to Class / Text / Prop) -->
-      <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted);">
-          <span id="edit-label">Live Editor (Class / Text):</span>
-          <span id="edit-type-badge" style="color: #38bdf8;">—</span>
-        </div>
-        <select id="select-prop" style="display:none;"><option value="">(No static string props)</option></select>
-        <input id="input-universal" placeholder="Select an element to edit..." disabled />
-        <div style="display: flex; gap: 4px;">
-          <button id="btn-preview" class="secondary" style="flex:1;" disabled>Preview Diff</button>
-          <button id="btn-apply" class="success" style="flex:1;" disabled>Apply Patch</button>
-        </div>
-      </div>
-
-      <h3>Source / Unified Diff / Logs</h3>
-      <pre id="code-preview">// Select an element from the page or Component Tree...</pre>
-
-      <h3>Live React Props &amp; State (Fiber)</h3>
-      <pre id="props-preview">// Inspect an element to see its live runtime props/state...</pre>
-    </div>
-
-    <!-- Col 3: AI Assistant & Full-Stack X-Ray -->
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <h3 style="margin:0;">AI Assistant &amp; Triage</h3>
-        <button id="btn-open-settings" class="secondary" style="padding:2px 6px; font-size:10px; margin:0;">⚙️ Settings</button>
-      </div>
-      <div id="ai-settings-summary" style="font-size:10px; color:var(--text-muted);">Provider: Gemini (default) — click ⚙️ to configure BYOK.</div>
-      <div style="display: flex; gap: 4px;">
-        <button id="btn-ai-fix" class="secondary" style="flex:1;" disabled>Propose AI Fix</button>
-        <button id="btn-ai-apply" class="success" style="flex:1;" disabled>Apply AI Patch</button>
-      </div>
-      <div style="display: flex; gap: 4px;">
-        <button id="btn-copy-bundle" class="secondary" style="flex:1;">Copy Cursor Bundle</button>
-      </div>
-      <div id="ai-explanation" style="font-size: 11px; color: #38bdf8; min-height: 16px;"></div>
-
-      <h3>Full-Stack X-Ray (Backend Crash)</h3>
-      <div id="traces-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
-        <div style="font-size: 11px; color: #64748b;">Listening for errors...</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Settings Modal: Enterprise AI provider / BYOK (hidden by default) -->
-  <div id="settings-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.85); z-index:999; justify-content:center; align-items:center;">
-    <div style="background:#1e293b; border:1px solid #334155; border-radius:8px; padding:16px; width:320px; display:flex; flex-direction:column; gap:8px;">
-      <h3 style="margin:0; color:#93c5fd; font-size:12px;">⚙️ DevBridge AI Settings</h3>
-      <div style="font-size:10px; color:var(--text-muted);">Configure your enterprise provider or BYOK credentials. Stored only in this browser.</div>
-
-      <label class="mini" style="font-size:10px; color:var(--text-muted);">AI Provider:</label>
-      <select id="modal-ai-provider">
-        <option value="gemini">Google Gemini</option>
-        <option value="openai">OpenAI (GPT-4o)</option>
-        <option value="anthropic">Anthropic Claude</option>
-        <option value="openai-compatible">Custom Gateway / Ollama</option>
-      </select>
-
-      <label class="mini" style="font-size:10px; color:var(--text-muted);">Model Override:</label>
-      <input id="modal-ai-model" placeholder="e.g. gpt-4o, claude-3-5-sonnet..." autocomplete="off" />
-
-      <label class="mini" style="font-size:10px; color:var(--text-muted);">API Key:</label>
-      <input id="modal-ai-apikey" type="password" placeholder="Enter API Key..." autocomplete="off" />
-
-      <label class="mini" style="font-size:10px; color:var(--text-muted);">Base URL (custom gateway only):</label>
-      <input id="modal-ai-baseurl" placeholder="e.g. http://127.0.0.1:11434/v1" autocomplete="off" />
-
-      <div style="display:flex; gap:6px; margin-top:8px;">
-        <button id="btn-save-settings" class="success" style="flex:1;">Save Settings</button>
-        <button id="btn-close-settings" class="secondary" style="flex:1;">Close</button>
-      </div>
-    </div>
-  </div>
-
   <script src="panel.js"></script>
 </body>
 </html>

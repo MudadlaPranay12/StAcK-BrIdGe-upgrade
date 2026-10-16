@@ -6,6 +6,25 @@ if (!window.__DEVBRIDGE_CONTENT_SCRIPT_LOADED__) {
   let inspectMode = false;
   let overlay = null;
   let label = null;
+  const runtimeErrors = [];
+  const networkFailures = [];
+  function remember(list, item) {
+    list.unshift({ ...item, timestamp: new Date().toISOString() });
+    if (list.length > 50) list.length = 50;
+  }
+  window.addEventListener("error", (event) => {
+    remember(runtimeErrors, { kind: "Runtime error", message: event.message || "Unhandled page error", source: event.filename || "unknown", line: event.lineno || 0 });
+  }, true);
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason?.message || String(event.reason || "Unhandled promise rejection");
+    remember(runtimeErrors, { kind: "Unhandled promise rejection", message: reason });
+  }, true);
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || event.data?.source !== "devbridge-runtime") return;
+    if (event.data.type === "NETWORK_FAILURE") {
+      remember(networkFailures, { kind: "Network failure", message: event.data.errorMessage || `HTTP ${event.data.statusCode}`, url: event.data.url, statusCode: event.data.statusCode, traceId: event.data.traceId, devId: event.data.devId });
+    }
+  });
 
   function ensureOverlay() {
     if (overlay) return;
@@ -152,7 +171,8 @@ if (!window.__DEVBRIDGE_CONTENT_SCRIPT_LOADED__) {
       if (tag === "img" && !el.hasAttribute("alt")) {
         issues.push("CRITICAL: <img> element is missing an 'alt' attribute.");
       }
-      if ((tag === "input" || tag === "select" || tag === "textarea") && !ariaLabel && !el.id) {
+      const hasLabel = Boolean(el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`));
+      if ((tag === "input" || tag === "select" || tag === "textarea") && !ariaLabel && !hasLabel) {
         issues.push("HIGH: Form input is missing an associated <label> or aria-label.");
       }
       if (el.hasAttribute("onclick") && tag === "div" && !el.getAttribute("role")) {
@@ -349,6 +369,9 @@ if (!window.__DEVBRIDGE_CONTENT_SCRIPT_LOADED__) {
           });
           if (sendResponse) sendResponse({ report });
         } catch {}
+        return true;
+      } else if (msg.type === "SCAN_DIAGNOSTICS") {
+        if (sendResponse) sendResponse({ errors: runtimeErrors.slice(), network: networkFailures.slice() });
         return true;
       }
     } catch (err) {

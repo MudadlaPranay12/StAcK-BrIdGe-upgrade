@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [
     devbridgePlugin({
       agentUrl: 'http://127.0.0.1:4321',
-      agentToken: 'devbridge-local-secret',
+      agentToken: process.env.DEVBRIDGE_TOKEN,
     }),
     react(),
   ],

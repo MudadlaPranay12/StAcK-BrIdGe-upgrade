@@ -6,3 +6,5 @@ dist/
 *.rollback.tmp
 .devbridge/
 .env
+
+backup-before-northstar/

@@ -69,9 +69,17 @@ export function devbridgePlugin(options: DevBridgePluginOptions = {}): Plugin {
               const headers = new Headers(init.headers || {});
               if (devId) headers.set('X-DevBridge-Dev-Id', devId);
               headers.set('X-DevBridge-Trace-Id', traceId);
-              return origFetch.call(this, input, { ...init, headers });
+              try {
+                const response = await origFetch.call(this, input, { ...init, headers });
+                if (!response.ok) {
+                  window.postMessage({ source: 'devbridge-runtime', type: 'NETWORK_FAILURE', url: String(input), statusCode: response.status, traceId, devId }, '*');
+                }
+                return response;
+              } catch (error) {
+                window.postMessage({ source: 'devbridge-runtime', type: 'NETWORK_FAILURE', url: String(input), statusCode: 0, traceId, devId, errorMessage: error && error.message ? error.message : 'Network request failed' }, '*');
+                throw error;
+              }
             };
-            console.log('[DevBridge Runtime] Fetch & DOM tracker active');
           `,
         },
       ];
@@ -85,16 +93,19 @@ export function devbridgePlugin(options: DevBridgePluginOptions = {}): Plugin {
 
       try {
         const relFile = path.relative(projectRoot, cleanId).replace(/\\/g, '/');
+        if (!relFile || relFile.startsWith('../') || path.isAbsolute(relFile)) return null;
 
       const ast = parse(code, {
         sourceType: 'module',
         plugins: ['jsx', 'typescript'],
+        sourceFilename: cleanId,
       });
 
       const records: DevIdentityRecord[] = [];
       let currentComponent = 'Anonymous';
       // Ancestor data-dev-id stack for Component Tree nesting (parentId)
       const elementStack: string[] = [];
+      const pushedElements = new WeakSet<object>();
 
       // className="..." OR className={cn("...", ...)} / clsx(...) OR className={`...`}
       // returns the first statically-editable string range found.
@@ -105,6 +116,7 @@ export function devbridgePlugin(options: DevBridgePluginOptions = {}): Plugin {
           const lit = attr.value as t.StringLiteral;
           return {
             rawValue: lit.value,
+            syntax: 'quoted',
             start: { line: lit.loc!.start.line, column: lit.loc!.start.column },
             end: { line: lit.loc!.end.line, column: lit.loc!.end.column },
           };
@@ -126,6 +138,7 @@ export function devbridgePlugin(options: DevBridgePluginOptions = {}): Plugin {
           if (firstStrArg?.loc) {
             return {
               rawValue: firstStrArg.value,
+              syntax: 'quoted',
               start: { line: firstStrArg.loc.start.line, column: firstStrArg.loc.start.column },
               end: { line: firstStrArg.loc.end.line, column: firstStrArg.loc.end.column },
             };
@@ -138,6 +151,7 @@ export function devbridgePlugin(options: DevBridgePluginOptions = {}): Plugin {
           if (quasi.loc) {
             return {
               rawValue: quasi.value.cooked ?? quasi.value.raw,
+              syntax: 'template',
               start: { line: quasi.loc.start.line, column: quasi.loc.start.column },
               end: { line: quasi.loc.end.line, column: quasi.loc.end.column },
             };
@@ -165,10 +179,17 @@ export function devbridgePlugin(options: DevBridgePluginOptions = {}): Plugin {
 
           // Skip React Fragments
           let tagName = 'unknown';
-          if (t.isJSXIdentifier(node.name)) {
-            tagName = node.name.name;
-          } else if (t.isJSXMemberExpression(node.name)) {
-            tagName = 'MemberExpression';
+           if (t.isJSXIdentifier(node.name)) {
+             tagName = node.name.name;
+           } else if (t.isJSXMemberExpression(node.name)) {
+             const memberParts: string[] = [];
+             let member: any = node.name;
+             while (t.isJSXMemberExpression(member)) {
+               memberParts.unshift(member.property.name);
+               member = member.object;
+             }
+             if (t.isJSXIdentifier(member)) memberParts.unshift(member.name);
+             tagName = memberParts.join('.') || 'MemberExpression';
           }
           if (tagName === 'Fragment' || tagName === 'React.Fragment') return;
 
@@ -260,11 +281,12 @@ export function devbridgePlugin(options: DevBridgePluginOptions = {}): Plugin {
             classNameRange,
             textRange,
             stringProps: stringProps.length > 0 ? stringProps : undefined,
-          });
-          elementStack.push(devId);
-          },
-          exit() {
-            elementStack.pop();
+           });
+           elementStack.push(devId);
+           pushedElements.add(element);
+           },
+          exit(p: any) {
+            if (pushedElements.has(p.node)) elementStack.pop();
           },
         },
       });
@@ -286,7 +308,7 @@ export function devbridgePlugin(options: DevBridgePluginOptions = {}): Plugin {
           console.error('[DevBridge Vite] Failed to sync identities to agent:', (err as Error).message);
         });
 
-        const output = generate(ast, { retainLines: true, sourceMaps: true }, code);
+        const output = generate(ast, { retainLines: true, sourceMaps: true, sourceFileName: cleanId }, code);
         return {
           code: output.code,
           map: output.map,

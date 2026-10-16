@@ -60,6 +60,16 @@ async function readErrorBody(res: Response): Promise<string> {
   }
 }
 
+async function readJsonBody(res: Response, providerLabel: string): Promise<any> {
+  try {
+    return await res.json();
+  } catch {
+    const err: any = new Error(`${providerLabel} returned invalid JSON (non-JSON response).`);
+    err.statusCode = 502;
+    throw err;
+  }
+}
+
 export class AIManager {
   // defaultApiKey kept for back-compat (previously Gemini-only constructor arg).
   constructor(private defaultApiKey?: string) {}
@@ -170,7 +180,7 @@ export class AIManager {
       err.statusCode = 502;
       throw err;
     }
-    const data = await res.json();
+    const data = await readJsonBody(res, 'Gemini');
     const rawText: string | undefined = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!rawText?.trim()) {
       const err: any = new Error('Empty response from Gemini API.');
@@ -209,7 +219,7 @@ export class AIManager {
       err.statusCode = 502;
       throw err;
     }
-    const data = await res.json();
+    const data = await readJsonBody(res, 'OpenAI-compatible API');
     const rawText: string | undefined = data.choices?.[0]?.message?.content;
     if (!rawText?.trim()) {
       const err: any = new Error('Empty response from OpenAI-compatible API.');
@@ -246,7 +256,7 @@ export class AIManager {
       err.statusCode = 502;
       throw err;
     }
-    const data = await res.json();
+    const data = await readJsonBody(res, 'Anthropic');
     const rawText: string | undefined =
       typeof data.content?.[0]?.text === 'string'
         ? data.content[0].text

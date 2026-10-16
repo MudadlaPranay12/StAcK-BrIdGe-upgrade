@@ -1,6 +1,5 @@
-// panel.js — DevBridge DevTools: unified Smart Inspector + tree + a11y + git + verify + AI + X-Ray
-const AGENT_URL = "http://127.0.0.1:4321";
-const AGENT_TOKEN = "devbridge-local-secret";
+// panel.js — DevBridge DevTools panel. All operations below call a real agent
+// or browser message; the UI never treats a request as successful before it resolves.
 const tabId = chrome.devtools.inspectedWindow.tabId;
 
 const port = chrome.runtime.connect({ name: "devbridge-panel" });
@@ -18,7 +17,6 @@ let editMode = null;
 let stagedKind = "surgical";
 let pendingAiPatch = null; // { start, end, replacement }
 
-const agentStatus = document.getElementById("agent-status");
 const componentTree = document.getElementById("component-tree");
 const checkpointList = document.getElementById("checkpoint-list");
 const codePreview = document.getElementById("code-preview");
@@ -51,27 +49,110 @@ const settingsModal = document.getElementById("settings-modal");
 const aiSettingsSummary = document.getElementById("ai-settings-summary");
 
 async function agentFetch(path, options = {}) {
-  const res = await fetch(`${AGENT_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-DevBridge-Token": AGENT_TOKEN,
-      ...(options.headers || {}),
-    },
-  });
-  const data = await res.json();
+  const configError = connectionConfigError();
+  if (configError) throw new Error(configError);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  let res;
+  try {
+    res = await fetch(agentEndpoint(path), {
+      ...options,
+      signal: options.signal || controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "X-DevBridge-Token": readConnectionSettings().token,
+        ...(options.headers || {}),
+      },
+    });
+  } catch (err) {
+    throw new Error(err?.name === "AbortError" ? "Agent request timed out." : `Agent unreachable: ${err.message}`);
+  } finally { clearTimeout(timeout); }
+  let data;
+  try { data = await res.json(); } catch { throw new Error(`Agent returned an invalid response (HTTP ${res.status}).`); }
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
 
-// ---- Enterprise AI Settings (BYOK) behind a ⚙️ modal ----
+// ---- Local AI settings (BYOK) ----
 // Persisted in localStorage so developers enter the key once; the key is
 // only ever sent to the loopback agent (127.0.0.1) inside the AI-fix request.
 const LS_PROVIDER = "devbridge.ai.provider";
 const LS_MODEL = "devbridge.ai.model";
 const LS_APIKEY = "devbridge.ai.apikey";
 const LS_BASEURL = "devbridge.ai.baseurl";
+const LS_AGENT_URL = "devbridge.agent.url";
+const LS_AGENT_TOKEN = "devbridge.agent.token";
+const LS_BACKEND_URL = "devbridge.backend.url";
+const DEFAULT_AGENT_URL = "http://127.0.0.1:4321";
+const DEFAULT_BACKEND_URL = "http://127.0.0.1:4000/api/health";
+const agentStatus = document.getElementById("agent-status");
+const connectionMessage = document.getElementById("connection-message");
+const contentStatus = document.getElementById("content-status");
+const identityStatus = document.getElementById("identity-status");
+const mappingStatus = document.getElementById("mapping-status");
+const traceStatus = document.getElementById("trace-status");
+const lastSync = document.getElementById("last-sync");
+const projectRoot = document.getElementById("project-root");
+const framework = document.getElementById("framework");
+const inspectedSite = document.getElementById("inspected-site");
+const inspectedUrl = document.getElementById("inspected-url");
+const backendAvailability = document.getElementById("backend-availability");
+const gitDirectory = document.getElementById("git-directory");
+const gitRoot = document.getElementById("git-root");
+const gitState = document.getElementById("git-state");
+const gitSummary = document.getElementById("git-summary");
+const aiDiff = document.getElementById("ai-diff");
+const runtimeFindings = document.getElementById("runtime-findings");
+const a11yState = document.getElementById("a11y-state");
+const issuesState = document.getElementById("issues-state");
+const networkState = document.getElementById("network-state");
+const backendState = document.getElementById("backend-state");
+const inspectorDevId = document.getElementById("inspector-dev-id");
+const inspectorTag = document.getElementById("inspector-tag");
+const agentUrlInput = document.getElementById("modal-agent-url");
+const agentTokenInput = document.getElementById("modal-agent-token");
+const backendUrlInput = document.getElementById("modal-backend-url");
+const settingsError = document.getElementById("settings-error");
 let aiSettingsMemory = null;
+
+function readConnectionSettings() {
+  let stored = {};
+  try {
+    stored = {
+      url: localStorage.getItem(LS_AGENT_URL) || DEFAULT_AGENT_URL,
+      token: localStorage.getItem(LS_AGENT_TOKEN) || "",
+      backendUrl: localStorage.getItem(LS_BACKEND_URL) || DEFAULT_BACKEND_URL,
+    };
+  } catch {}
+  return stored;
+}
+
+function setStatus(el, text, tone = "warn") {
+  if (!el) return;
+  el.textContent = text;
+  el.className = `status ${tone}`;
+}
+
+function connectionConfigError() {
+  const cfg = readConnectionSettings();
+  if (!cfg.token) return "Configure the development token in Settings. It must match DEVBRIDGE_TOKEN used by the local agent.";
+  try {
+    const url = new URL(cfg.url);
+    if (url.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(url.hostname)) return "The agent endpoint must use http://localhost or http://127.0.0.1.";
+  } catch { return "The agent endpoint is not a valid URL."; }
+  return "";
+}
+
+function agentEndpoint(path) { return `${readConnectionSettings().url.replace(/\/$/, "")}${path}`; }
+async function checkBackendAvailability() {
+  const endpoint = readConnectionSettings().backendUrl;
+  if (!endpoint) { setStatus(backendAvailability, "Not configured", "warn"); return; }
+  try {
+    const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(endpoint, { signal: controller.signal }); clearTimeout(timeout);
+    setStatus(backendAvailability, response.ok ? "Available" : `HTTP ${response.status}`, response.ok ? "good" : "bad");
+  } catch { setStatus(backendAvailability, "Unavailable", "bad"); }
+}
 function readAiSettings() {
   // Live modal fields win while the modal is open; otherwise stored values.
   const live = {
@@ -113,8 +194,8 @@ function updateAiSettingsSummary() {
   if (aiSettingsSummary) {
     const bits = [`Provider: ${s.provider}`];
     if (s.model) bits.push(`Model: ${s.model}`);
-    bits.push(s.apiKey ? "Key: ●●●● set" : "Key: agent .env");
-    aiSettingsSummary.textContent = bits.join(" — ") + " — click ⚙️ to change.";
+     bits.push(s.apiKey ? "Key: set" : "Key: agent environment");
+     aiSettingsSummary.textContent = bits.join(" — ") + " — edit in Settings.";
   }
 }
 function persistAiSettings() {
@@ -132,6 +213,13 @@ function persistAiSettings() {
     localStorage.setItem(LS_BASEURL, s.baseUrl);
   } catch {}
   updateAiSettingsSummary();
+}
+function restoreConnectionSettings() {
+  const cfg = readConnectionSettings();
+  if (agentUrlInput) agentUrlInput.value = cfg.url;
+  if (agentTokenInput) agentTokenInput.value = cfg.token;
+  if (backendUrlInput) backendUrlInput.value = cfg.backendUrl;
+  return Boolean(cfg.token);
 }
 function restoreAiSettings() {
   let saved = null;
@@ -155,22 +243,24 @@ function restoreAiSettings() {
   updateAiSettingsSummary();
   return false;
 }
-for (const el of [aiProvider, aiApiKey, aiModel, aiBaseUrl]) {
-  if (el) el.addEventListener("change", persistAiSettings);
-}
 const hasSavedSettings = restoreAiSettings();
+const hasConnectionSettings = restoreConnectionSettings();
 
 // ---- Settings modal open/close/save + first-run onboarding ----
 function openSettingsModal() {
-  if (settingsModal) settingsModal.style.display = "flex";
+  restoreConnectionSettings();
+  if (settingsModal) settingsModal.classList.add("open");
+  agentTokenInput?.focus();
 }
 function closeSettingsModal() {
-  if (settingsModal) settingsModal.style.display = "none";
+  if (settingsModal) settingsModal.classList.remove("open");
 }
 const btnOpenSettings = document.getElementById("btn-open-settings");
+const btnSettingsPanel = document.getElementById("btn-settings-panel");
 const btnSaveSettings = document.getElementById("btn-save-settings");
 const btnCloseSettings = document.getElementById("btn-close-settings");
 if (btnOpenSettings) btnOpenSettings.addEventListener("click", openSettingsModal);
+if (btnSettingsPanel) btnSettingsPanel.addEventListener("click", openSettingsModal);
 if (btnCloseSettings) btnCloseSettings.addEventListener("click", closeSettingsModal);
 if (settingsModal) {
   settingsModal.addEventListener("click", (e) => {
@@ -178,19 +268,37 @@ if (settingsModal) {
   });
 }
 if (btnSaveSettings) {
-  btnSaveSettings.addEventListener("click", () => {
-    persistAiSettings();
-    closeSettingsModal();
-    if (aiExplanation) {
-      aiExplanation.textContent = "✅ AI Settings saved successfully!";
-      setTimeout(() => {
-        if (aiExplanation.textContent.startsWith("✅ AI Settings saved")) aiExplanation.textContent = "";
-      }, 2000);
+  btnSaveSettings.addEventListener("click", async () => {
+    const url = agentUrlInput?.value.trim() || "";
+    const token = agentTokenInput?.value || "";
+    const provider = aiProvider?.value || "gemini";
+    let error = "";
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(parsed.hostname)) error = "Agent endpoint must be a local http URL.";
+    } catch { error = "Agent endpoint must be a valid URL."; }
+    if (!token) error = "Development token is required to authenticate with the local agent.";
+    if (provider === "openai-compatible" && aiBaseUrl?.value.trim()) {
+      try { new URL(aiBaseUrl.value.trim()); } catch { error = "AI gateway URL must be a valid URL."; }
+    }
+    if (error) { if (settingsError) settingsError.textContent = error; return; }
+    if (settingsError) settingsError.textContent = "Validating agent connection…";
+    const previous = readConnectionSettings();
+    try {
+      localStorage.setItem(LS_AGENT_URL, url); localStorage.setItem(LS_AGENT_TOKEN, token); localStorage.setItem(LS_BACKEND_URL, backendUrlInput?.value.trim() || "");
+      persistAiSettings();
+      await agentFetch("/api/v1/status");
+      if (settingsError) settingsError.textContent = "Connection validated.";
+      closeSettingsModal();
+      loadComponentTree();
+    } catch (err) {
+      localStorage.setItem(LS_AGENT_URL, previous.url || DEFAULT_AGENT_URL); localStorage.setItem(LS_AGENT_TOKEN, previous.token || ""); localStorage.setItem(LS_BACKEND_URL, previous.backendUrl || "");
+      if (settingsError) settingsError.textContent = `Could not validate settings: ${err.message}`;
     }
   });
 }
 // First-run: no saved provider/key yet → open the setup modal automatically.
-if (!hasSavedSettings) {
+if (!hasSavedSettings || !hasConnectionSettings) {
   try {
     openSettingsModal();
   } catch {}
@@ -198,21 +306,38 @@ if (!hasSavedSettings) {
 
 // ---- Component Tree + Checkpoints ----
 async function loadComponentTree() {
+  const configError = connectionConfigError();
+  if (configError) {
+    setStatus(agentStatus, "Not configured", "bad");
+    setStatus(identityStatus, "Blocked", "bad");
+    setStatus(mappingStatus, "Unavailable", "bad");
+    if (connectionMessage) connectionMessage.textContent = configError;
+    return;
+  }
+  setStatus(agentStatus, "Checking…", "warn");
   try {
-    const data = await agentFetch("/api/v1/identities");
-    agentStatus.textContent = "🟢 Connected";
-    agentStatus.className = "pill online";
+    const [data, status] = await Promise.all([agentFetch("/api/v1/identities"), agentFetch("/api/v1/status")]);
+    setStatus(agentStatus, "Connected", "good");
+    setStatus(identityStatus, `${data.records?.length || 0} registered`, "good");
+    setStatus(mappingStatus, status.sourceMapping?.available ? "Available" : "Waiting for Vite", status.sourceMapping?.available ? "good" : "warn");
+    setStatus(traceStatus, status.backendTraces?.available ? "Available" : "Waiting for traces", status.backendTraces?.available ? "good" : "warn");
+    projectRoot.textContent = status.projectRoot || "Not reported";
+    if (lastSync) lastSync.textContent = new Date().toLocaleTimeString();
+    if (connectionMessage) connectionMessage.textContent = status.sourceMapping?.message || "Agent authenticated and reachable.";
+    checkBackendAvailability();
     renderComponentTree(data.records || []);
     renderCheckpoints(data.checkpoints || []);
-  } catch {
-    agentStatus.textContent = "🔴 Offline";
-    agentStatus.className = "pill offline";
+  } catch (err) {
+    setStatus(agentStatus, "Unavailable", "bad");
+    setStatus(identityStatus, "Failed", "bad");
+    setStatus(mappingStatus, "Unavailable", "bad");
+    if (connectionMessage) connectionMessage.textContent = err.message;
   }
 }
 
 function renderComponentTree(records) {
   if (!records.length) {
-    componentTree.innerHTML = `<div style="color:var(--text-muted);">No elements found. Hard refresh page.</div>`;
+    componentTree.textContent = "No identity records found. Confirm the Vite plugin is running, then hard-refresh the inspected page.";
     return;
   }
   const byId = new Map(records.map((r) => [r.id, r]));
@@ -234,7 +359,12 @@ function renderComponentTree(records) {
   const buildItem = (rec) => {
     const item = document.createElement("div");
     item.className = "tree-item" + (currentRecord?.id === rec.id ? " active" : "");
-    item.innerHTML = `<span>&lt;${rec.componentName}&gt; <strong style="color:#60a5fa">${rec.tagName}</strong></span><span style="color:#64748b">:${rec.start.line}</span>`;
+    const label = document.createElement("span");
+    label.textContent = `<${rec.componentName}> ${rec.tagName}`;
+    const line = document.createElement("span");
+    line.className = "muted";
+    line.textContent = `:${rec.start.line}`;
+    item.append(label, line);
     item.title = `${rec.file}:${rec.start.line}:${rec.start.column} (${rec.id})`;
     item.onclick = () => selectIdentity(rec.id, null, []);
     return item;
@@ -256,27 +386,32 @@ function renderComponentTree(records) {
 }
 
 function renderCheckpoints(checkpoints) {
+  if (btnRollback) btnRollback.disabled = checkpoints.length === 0;
   if (!checkpoints.length) {
     checkpointList.textContent = "No edits yet.";
     return;
   }
-  checkpointList.innerHTML = checkpoints
-    .map(
-      (c) =>
-        `<div><code>${String(c.id).slice(0, 12)}</code> • ${c.file}${
-          c.verifiedGreen ? ' <span style="color:#4ade80">✔ Green</span>' : ""
-        }</div>`
-    )
-    .join("");
+  checkpointList.textContent = "";
+  for (const c of checkpoints) {
+    const row = document.createElement("div");
+    row.className = "small";
+    row.textContent = `${String(c.id).slice(0, 12)} • ${c.file}${c.verifiedGreen ? " • Verified" : ""}`;
+    checkpointList.appendChild(row);
+  }
 }
 
 function renderA11yIssues(issues) {
   currentA11yIssues = issues || [];
   if (!currentA11yIssues.length) {
-    a11yAlerts.innerHTML = "";
+    a11yAlerts.textContent = "No accessibility issues found in the mapped elements.";
+    a11yAlerts.className = "finding good";
     return;
   }
-  a11yAlerts.innerHTML = `<div class="a11y-box"><strong>♿ Accessibility Warnings (${currentA11yIssues.length}):</strong><br>${currentA11yIssues.join("<br>")}</div>`;
+  a11yAlerts.textContent = "";
+  a11yAlerts.className = "finding";
+  const title = document.createElement("strong"); title.textContent = `Accessibility issues (${currentA11yIssues.length})`;
+  a11yAlerts.appendChild(title);
+  for (const issue of currentA11yIssues) { const item = document.createElement("div"); item.textContent = issue; a11yAlerts.appendChild(item); }
 }
 
 function renderFiberInspector() {
@@ -310,7 +445,7 @@ function currentSurgicalRange() {
 }
 
 function replacementForMode() {
-  if (editMode === "className") return `"${inputUniversal.value}"`;
+  if (editMode === "className") return currentRecord?.classNameRange?.syntax === "template" ? `\`${inputUniversal.value}\`` : `"${inputUniversal.value}"`;
   if (editMode === "prop") return `"${inputUniversal.value}"`;
   return inputUniversal.value;
 }
@@ -386,6 +521,7 @@ async function selectIdentity(devId, runtime = null, a11y = []) {
     pendingAiPatch = null;
     stagedKind = "surgical";
     if (runtime) {
+      setStatus(contentStatus, "Connected", "good");
       currentRuntime = {
         fiberProps: runtime.fiberProps ?? null,
         fiberState: runtime.fiberState ?? null,
@@ -400,6 +536,9 @@ async function selectIdentity(devId, runtime = null, a11y = []) {
 
     inspectorTitle.textContent = `<${currentRecord.componentName}> (${currentRecord.tagName})`;
     inspectorFile.textContent = `${currentRecord.file}:${currentRecord.start.line}:${currentRecord.start.column}`;
+    if (inspectorDevId) inspectorDevId.textContent = currentRecord.id;
+    if (inspectorTag) inspectorTag.textContent = currentRecord.tagName;
+    setStatus(mappingStatus, "Available", "good");
     if (instanceMeta) {
       const n = currentRuntime?.instanceCount;
       instanceMeta.textContent =
@@ -422,13 +561,17 @@ async function selectIdentity(devId, runtime = null, a11y = []) {
     renderFiberInspector();
     loadComponentTree();
   } catch (err) {
+    setStatus(contentStatus, "Failed", "bad");
     // Stale data-dev-id (agent restarted and lost its registry): auto re-sync
     // the tree and show a one-click recovery message instead of a dead end.
     if (/IDENTITY_STALE|Identity not found|re-register/i.test(err.message || "")) {
       inspectorTitle.textContent = "Stale element ID — agent restarted";
       inspectorFile.textContent = "—";
+      if (inspectorDevId) inspectorDevId.textContent = devId || "—";
+      if (inspectorTag) inspectorTag.textContent = "—";
+      setStatus(mappingStatus, "Stale identity", "bad");
       codePreview.textContent = [
-        "⚠️ This element was stamped before the Local Agent last restarted,",
+        "This element was stamped before the Local Agent last restarted.",
         "so its ID is no longer in the agent registry.",
         "",
         "Recover in 10 seconds:",
@@ -474,16 +617,13 @@ btnLocate.addEventListener("click", () => {
 
 btnOpenFront.addEventListener("click", async () => {
   if (!currentRecord) return;
-  await agentFetch("/api/v1/ide/open", {
-    method: "POST",
-    body: JSON.stringify({
-      file: currentRecord.file,
-      line: currentRecord.start.line,
-      column: currentRecord.start.column + 1,
-      target: "frontend",
-      editor: "cursor",
-    }),
-  });
+  const oldText = btnOpenFront.textContent;
+  btnOpenFront.disabled = true; btnOpenFront.textContent = "Opening…";
+  try {
+    await agentFetch("/api/v1/ide/open", { method: "POST", body: JSON.stringify({ file: currentRecord.file, line: currentRecord.start.line, column: currentRecord.start.column + 1, target: "frontend", editor: "cursor" }) });
+    if (connectionMessage) connectionMessage.textContent = "IDE open request sent.";
+  } catch (err) { if (connectionMessage) connectionMessage.textContent = `IDE navigation failed: ${err.message}`; }
+  finally { btnOpenFront.disabled = false; btnOpenFront.textContent = oldText; }
 });
 
 // Unified live preview: classes and text both preview in the DOM while typing
@@ -504,6 +644,7 @@ btnPreview.addEventListener("click", async () => {
   const range = currentSurgicalRange();
   if (!currentRecord || !range) return;
   stagedKind = "surgical";
+  const oldText = btnPreview.textContent; btnPreview.disabled = true; btnPreview.textContent = "Validating…";
   try {
     const res = await agentFetch("/api/v1/patches/preview", {
       method: "POST",
@@ -516,13 +657,15 @@ btnPreview.addEventListener("click", async () => {
       }),
     });
     codePreview.textContent = res.unifiedDiff;
+    if (aiDiff) aiDiff.textContent = res.unifiedDiff;
   } catch (err) {
-    codePreview.textContent = `❌ Diff / AST Validation Blocked: ${err.message}`;
-  }
+    codePreview.textContent = `Patch preview blocked: ${err.message}`;
+  } finally { btnPreview.disabled = false; btnPreview.textContent = oldText; }
 });
 
 async function doApplyStaged() {
   if (!currentRecord) return;
+  if (!window.confirm("Apply this validated patch to the source file? This changes a file on disk.")) return;
   // AI element patch takes precedence when one is staged
   if (stagedKind === "ai" && pendingAiPatch) {
     btnAiApply.disabled = true;
@@ -542,11 +685,12 @@ async function doApplyStaged() {
       lastCheckpointId = res.checkpointId;
       pendingAiPatch = null;
       stagedKind = "surgical";
-      codePreview.textContent = `✅ AI patch applied & AST-verified! Checkpoint: ${res.checkpointId}\nClick "tsc Check" to mark this checkpoint Green — then re-inspect to continue editing.`;
-      if (aiExplanation) aiExplanation.textContent += ` ✅ Applied! Checkpoint: ${res.checkpointId}`;
+      codePreview.textContent = `AI patch applied and AST-verified. Checkpoint: ${res.checkpointId}\nRun typecheck to verify it.`;
+      if (aiDiff) aiDiff.textContent = codePreview.textContent;
+      if (aiExplanation) aiExplanation.textContent += ` Applied. Checkpoint: ${res.checkpointId}`;
       loadComponentTree();
     } catch (err) {
-      codePreview.textContent = `❌ Apply Failed: ${err.message}`;
+      codePreview.textContent = `Apply failed: ${err.message}`;
       btnAiApply.disabled = false;
       btnApply.disabled = false;
     }
@@ -555,6 +699,8 @@ async function doApplyStaged() {
   const range = currentSurgicalRange();
   if (!range) return;
   const replacement = replacementForMode();
+  btnApply.disabled = true;
+  const applyText = btnApply.textContent; btnApply.textContent = "Applying…";
   try {
     const res = await agentFetch("/api/v1/patches/apply", {
       method: "POST",
@@ -583,34 +729,37 @@ async function doApplyStaged() {
         editTypeBadge.textContent = `Prop: ${p.name}`;
       }
     }
-    codePreview.textContent = `✅ Applied & AST-verified! Checkpoint: ${res.checkpointId}\nClick "tsc Check" to mark this checkpoint Green.`;
+      codePreview.textContent = `Patch applied and AST-verified. Checkpoint: ${res.checkpointId}\nRun typecheck to verify it.`;
     loadComponentTree();
   } catch (err) {
-    codePreview.textContent = `❌ Apply Failed: ${err.message}`;
-  }
+    codePreview.textContent = `Apply failed: ${err.message}`;
+  } finally { btnApply.disabled = false; btnApply.textContent = applyText; }
 }
 
 btnApply.addEventListener("click", doApplyStaged);
 if (btnAiApply) btnAiApply.addEventListener("click", doApplyStaged);
 
 btnRollback.addEventListener("click", async () => {
+  if (!window.confirm("Rollback the most recent checkpoint? The file must not have changed since that patch was applied.")) return;
+  btnRollback.disabled = true;
+  const oldText = btnRollback.textContent; btnRollback.textContent = "Rolling back…";
   try {
     const res = await agentFetch("/api/v1/patches/rollback", { method: "POST" });
     pendingAiPatch = null;
     stagedKind = "surgical";
     if (btnAiApply) btnAiApply.disabled = true;
-    codePreview.textContent = `⏪ Rolled back file: ${res.rolledBack.file}`;
+    codePreview.textContent = `Rolled back file: ${res.rolledBack.file}`;
     loadComponentTree();
     if (currentRecord) selectIdentity(currentRecord.id, currentRuntime, currentA11yIssues);
   } catch (err) {
     codePreview.textContent = `Rollback error: ${err.message}`;
-  }
+  } finally { btnRollback.disabled = false; btnRollback.textContent = oldText; }
 });
 
 btnAiFix.addEventListener("click", async () => {
   if (!currentRecord) return;
   const providerLabel = aiProvider?.value || "gemini";
-  aiExplanation.textContent = `🤖 AI (${providerLabel}) is analyzing AST source, A11y warnings, and backend traces...`;
+  aiExplanation.textContent = `AI (${providerLabel}) is analyzing source, accessibility findings, and backend traces…`;
   btnAiFix.disabled = true;
   if (btnAiApply) btnAiApply.disabled = true;
   pendingAiPatch = null;
@@ -632,7 +781,7 @@ btnAiFix.addEventListener("click", async () => {
       replacement: suggestion.replacement,
     };
     stagedKind = "ai";
-    aiExplanation.textContent = `💡 ${suggestion.explanation || "Suggested AI Fix"}`;
+    aiExplanation.textContent = suggestion.explanation || "Suggested AI fix";
     // Stage as a reviewable unified diff over the element range (AST-validated)
     const res = await agentFetch("/api/v1/patches/preview", {
       method: "POST",
@@ -645,9 +794,10 @@ btnAiFix.addEventListener("click", async () => {
       }),
     });
     codePreview.textContent = res.unifiedDiff;
+    if (aiDiff) aiDiff.textContent = res.unifiedDiff;
     if (btnAiApply) btnAiApply.disabled = false;
   } catch (err) {
-    aiExplanation.textContent = `❌ AI Error: ${err.message}`;
+    aiExplanation.textContent = `AI error: ${err.message}`;
     pendingAiPatch = null;
     stagedKind = "surgical";
   } finally {
@@ -683,18 +833,21 @@ port.onMessage.addListener((msg) => {
 
 function connectWS() {
   let ws;
+  let wsToken = "";
   try {
-    ws = new WebSocket("ws://127.0.0.1:4321");
+    const cfgError = connectionConfigError();
+    if (cfgError) { setStatus(traceStatus, "Waiting for agent", "warn"); return; }
+    const cfg = readConnectionSettings();
+    wsToken = cfg.token;
+    ws = new WebSocket(`${cfg.url.replace(/^http/, "ws")}/`);
   } catch {
-    agentStatus.textContent = "🔴 Offline";
-    agentStatus.className = "pill offline";
+    setStatus(agentStatus, "Unavailable", "bad");
     setTimeout(connectWS, 3000);
     return;
   }
-  ws.onopen = () => loadComponentTree();
+  ws.onopen = () => { ws.send(JSON.stringify({ type: "AUTH", token: wsToken })); loadComponentTree(); };
   ws.onclose = () => {
-    agentStatus.textContent = "🔴 Offline";
-    agentStatus.className = "pill offline";
+    setStatus(traceStatus, "Disconnected", "bad");
     setTimeout(connectWS, 3000);
   };
   ws.onerror = () => {
@@ -711,6 +864,7 @@ function connectWS() {
     }
     if (data.type === "BACKEND_TRACE") {
       latestBackendTrace = data.trace;
+      setStatus(traceStatus, "Available", "good"); setStatus(backendState, "Issues found", "bad");
       renderTrace(data.trace);
     } else if (data.type === "IDENTITIES_UPDATED") {
       loadComponentTree();
@@ -728,19 +882,20 @@ loadComponentTree();
 function renderTrace(t) {
   const div = document.createElement("div");
   div.className = "trace-box";
-  div.innerHTML = `
-    <div><strong>[${t.method} ${t.url} → ${t.statusCode}]</strong> (Trace: <code>${t.traceId}</code>)</div>
-    <div>Triggered by DOM ID: <code>${t.triggeredByDevId || "unknown"}</code></div>
-    <div style="color:#fca5a5;margin:4px 0;">Error: ${t.errorMessage}</div>
-    <div>Backend Source: <code>${t.backendFile || "unmapped"}:${t.backendLine || "?"}</code></div>
-  `;
+  const summary = document.createElement("strong"); summary.textContent = `[${t.method} ${t.url} → ${t.statusCode}]`;
+  const traceId = document.createElement("div"); traceId.textContent = `Correlation ID: ${t.traceId || "unavailable"}`;
+  const trigger = document.createElement("div"); trigger.textContent = `Triggered by DOM ID: ${t.triggeredByDevId || "unknown"}`;
+  const error = document.createElement("div"); error.className = "error-text"; error.textContent = `Error: ${t.errorMessage || "Unknown backend error"}`;
+  const source = document.createElement("div"); source.textContent = `Backend source: ${t.backendFile || "unmapped"}:${t.backendLine || "?"}`;
+  div.append(summary, traceId, trigger, error, source);
   if (t.backendFile) {
     const btn = document.createElement("button");
     btn.style.marginTop = "6px";
     btn.textContent = `Open Backend in Cursor (${t.backendFile}:${t.backendLine})`;
-    btn.onclick = () =>
-      agentFetch("/api/v1/ide/open", {
-        method: "POST",
+     btn.onclick = async () => {
+       btn.disabled = true; btn.textContent = "Opening backend source…";
+       try { await agentFetch("/api/v1/ide/open", {
+         method: "POST",
         body: JSON.stringify({
           file: t.backendFile,
           line: t.backendLine,
@@ -748,7 +903,8 @@ function renderTrace(t) {
           target: "backend",
           editor: "cursor",
         }),
-      });
+       }); } catch (err) { error.textContent = `Backend navigation failed: ${err.message}`; } finally { btn.disabled = false; btn.textContent = `Open backend source (${t.backendFile}:${t.backendLine || "?"})`; }
+     };
     div.appendChild(btn);
   }
   tracesContainer.prepend(div);
@@ -756,50 +912,67 @@ function renderTrace(t) {
 
 document.getElementById("btn-sync").onclick = loadComponentTree;
 document.getElementById("btn-git").onclick = async () => {
+  const button = document.getElementById("btn-git"); const oldText = button.textContent; button.disabled = true; button.textContent = "Inspecting…";
   try {
     const res = await agentFetch("/api/v1/git/status");
-    codePreview.textContent = [`🌿 Branch: ${res.branch}`, `📋 Status:\n${res.status}`, `\n--- Working Tree Git Diff ---\n${res.diff}`].join("\n");
+    gitDirectory.textContent = res.checkedDirectory || "—"; gitRoot.textContent = res.repositoryRoot || "Not a repository";
+    gitState.textContent = `${res.message} State: ${res.state}.`;
+    gitState.className = `notice ${res.state === "clean" ? "success-text" : res.state === "dirty" ? "error-text" : ""}`;
+    gitSummary.textContent = [`State: ${res.state}`, `Branch: ${res.branch || "—"}`, `Status:\n${res.status || "—"}`, `Files: ${(res.files || []).length}`, "", "--- Diff (staged + unstaged) ---", res.diff || "No diff available.", res.diffTruncated ? "[Diff truncated at 20,000 characters]" : ""].join("\n");
     renderCheckpoints(res.checkpoints || []);
   } catch (err) {
-    codePreview.textContent = `Git Error: ${err.message}`;
-  }
+    gitState.textContent = `Git inspection failed: ${err.message}`; gitState.className = "notice error-text"; gitSummary.textContent = err.message;
+  } finally { button.disabled = false; button.textContent = oldText; }
 };
 document.getElementById("btn-tsc").onclick = async () => {
-  codePreview.textContent = "⏳ Running `tsc --noEmit` in FRONTEND_ROOT...";
+  const button = document.getElementById("btn-tsc"); const oldText = button.textContent; button.disabled = true; button.textContent = "Checking…"; gitSummary.textContent = "Running TypeScript verification in the configured project root…";
   try {
     const res = await agentFetch("/api/v1/verify", {
       method: "POST",
       body: JSON.stringify({ checkpointId: lastCheckpointId }),
     });
-    codePreview.textContent = res.output;
+    gitSummary.textContent = `${res.state || (res.ok ? "passed" : "failed")}\n${res.output}`;
     loadComponentTree();
   } catch (err) {
-    codePreview.textContent = `Verification Error: ${err.message}`;
-  }
+    gitSummary.textContent = `Verification failed: ${err.message}`;
+  } finally { button.disabled = false; button.textContent = oldText; }
 };
 document.getElementById("btn-a11y").onclick = () => {
-  codePreview.textContent = "♿ Scanning page accessibility on mapped elements...";
+  const button = document.getElementById("btn-a11y"); button.disabled = true; button.textContent = "Scanning…"; setStatus(a11yState, "Running", "warn");
   try {
     chrome.tabs.sendMessage(tabId, { type: "SCAN_PAGE_A11Y" }, (res) => {
       if (chrome.runtime.lastError) {
-        codePreview.textContent = `A11y scan unavailable: ${chrome.runtime.lastError.message}`;
+        setStatus(a11yState, "Failed", "bad"); runtimeFindings.textContent = `Accessibility scan unavailable: ${chrome.runtime.lastError.message}`; button.disabled = false; button.textContent = "Scan mapped elements";
         return;
       }
       if (!res?.report?.length) {
-        codePreview.textContent = "✅ Page Accessibility Scan: 0 issues detected on mapped elements!";
+        setStatus(a11yState, "Passed", "good"); renderA11yIssues([]); button.disabled = false; button.textContent = "Scan mapped elements";
         return;
       }
-      codePreview.textContent =
-        `♿ Page Accessibility Audit (${res.report.length} elements with warnings):\n\n` +
-        res.report.map((r) => `[${r.devId}] <${r.tagName}>:\n  - ${r.issues.join("\n  - ")}`).join("\n\n");
+      setStatus(a11yState, `${res.report.length} issues`, "bad");
+      const issues = res.report.flatMap((r) => r.issues.map((issue) => `[${r.devId}] <${r.tagName}>: ${issue}`)); renderA11yIssues(issues);
+      button.disabled = false; button.textContent = "Scan mapped elements";
     });
   } catch (err) {
-    codePreview.textContent = `A11y scan unavailable: ${err.message}`;
+    setStatus(a11yState, "Failed", "bad"); runtimeFindings.textContent = `Accessibility scan unavailable: ${err.message}`; button.disabled = false; button.textContent = "Scan mapped elements";
   }
 };
 
+document.getElementById("btn-issues").onclick = () => {
+  const button = document.getElementById("btn-issues"); button.disabled = true; button.textContent = "Reading…"; setStatus(issuesState, "Running", "warn"); setStatus(networkState, "Running", "warn");
+  chrome.tabs.sendMessage(tabId, { type: "SCAN_DIAGNOSTICS" }, (res) => {
+    if (chrome.runtime.lastError || !res) { setStatus(issuesState, "Failed", "bad"); runtimeFindings.textContent = `Diagnostics unavailable: ${chrome.runtime.lastError?.message || "No response"}`; button.disabled = false; button.textContent = "Inspect runtime issues"; return; }
+    const errors = res.errors || []; const network = res.network || [];
+    setStatus(issuesState, errors.length ? `${errors.length} issues` : "Passed", errors.length ? "bad" : "good"); setStatus(networkState, network.length ? `${network.length} failures` : "Passed", network.length ? "bad" : "good");
+    runtimeFindings.textContent = "";
+    for (const finding of [...errors, ...network]) { const item = document.createElement("div"); item.className = "finding error"; item.textContent = `${finding.kind || "Runtime"}: ${finding.message || finding.url || "Unknown issue"}`; runtimeFindings.appendChild(item); }
+    if (!errors.length && !network.length) { const item = document.createElement("div"); item.className = "finding good"; item.textContent = "No captured console, runtime, or network failures."; runtimeFindings.appendChild(item); }
+    button.disabled = false; button.textContent = "Inspect runtime issues";
+  });
+};
+
 // 14. Copy Full-Stack Bug Context Bundle for Cursor AI
-btnCopyBundle.addEventListener("click", () => {
+btnCopyBundle.addEventListener("click", async () => {
   const markdown = [
     `## DevBridge Full-Stack Bug Context`,
     currentRecord
@@ -835,7 +1008,27 @@ btnCopyBundle.addEventListener("click", () => {
     .filter(Boolean)
     .join("\n");
 
-  navigator.clipboard.writeText(markdown);
-  btnCopyBundle.textContent = "✅ Copied Bundle!";
-  setTimeout(() => (btnCopyBundle.textContent = "Copy Cursor Bundle"), 1500);
+  const oldText = btnCopyBundle.textContent; btnCopyBundle.disabled = true; btnCopyBundle.textContent = "Copying…";
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable in this DevTools panel.");
+    await navigator.clipboard.writeText(markdown);
+    btnCopyBundle.textContent = "Copied";
+  } catch (err) { codePreview.textContent = `Clipboard copy failed: ${err.message}\n\n${markdown}`; btnCopyBundle.textContent = "Copy failed — see source"; }
+  finally { setTimeout(() => { btnCopyBundle.disabled = false; btnCopyBundle.textContent = oldText; }, 1800); }
+});
+
+// Lightweight navigation keeps the narrow panel from becoming one long screen.
+for (const tab of document.querySelectorAll("[data-tab]")) {
+  tab.addEventListener("click", () => {
+    const name = tab.dataset.tab;
+    for (const button of document.querySelectorAll("[data-tab]")) button.setAttribute("aria-selected", button === tab ? "true" : "false");
+    for (const panel of document.querySelectorAll(".tab-panel")) { const active = panel.id === `${name}-panel`; panel.classList.toggle("active", active); panel.hidden = !active; }
+  });
+}
+
+chrome.devtools.inspectedWindow.eval("({ url: location.href, framework: window.__REACT_DEVTOOLS_GLOBAL_HOOK__ ? 'React' : 'Detected from page' })", (result) => {
+  if (chrome.runtime.lastError || !result) return;
+  inspectedUrl.textContent = result.url || "—";
+  try { inspectedSite.textContent = new URL(result.url).host; } catch { inspectedSite.textContent = "Inspected tab"; }
+  framework.textContent = result.framework || "Unknown";
 });
