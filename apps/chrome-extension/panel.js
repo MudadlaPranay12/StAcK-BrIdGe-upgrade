@@ -43,10 +43,12 @@ const btnApply = document.getElementById("btn-apply");
 const btnAiFix = document.getElementById("btn-ai-fix");
 const btnAiApply = document.getElementById("btn-ai-apply");
 const btnCopyBundle = document.getElementById("btn-copy-bundle");
-const aiProvider = document.getElementById("ai-provider");
-const aiApiKey = document.getElementById("ai-apikey");
-const aiModel = document.getElementById("ai-model");
-const aiBaseUrl = document.getElementById("ai-baseurl");
+const aiProvider = document.getElementById("modal-ai-provider");
+const aiApiKey = document.getElementById("modal-ai-apikey");
+const aiModel = document.getElementById("modal-ai-model");
+const aiBaseUrl = document.getElementById("modal-ai-baseurl");
+const settingsModal = document.getElementById("settings-modal");
+const aiSettingsSummary = document.getElementById("ai-settings-summary");
 
 async function agentFetch(path, options = {}) {
   const res = await fetch(`${AGENT_URL}${path}`, {
@@ -62,15 +64,39 @@ async function agentFetch(path, options = {}) {
   return data;
 }
 
-// ---- Enterprise AI Settings (BYOK) — session-only, never written to disk ----
-const AI_SESSION_KEY = "devbridge-ai-settings";
+// ---- Enterprise AI Settings (BYOK) behind a ⚙️ modal ----
+// Persisted in localStorage so developers enter the key once; the key is
+// only ever sent to the loopback agent (127.0.0.1) inside the AI-fix request.
+const LS_PROVIDER = "devbridge.ai.provider";
+const LS_MODEL = "devbridge.ai.model";
+const LS_APIKEY = "devbridge.ai.apikey";
+const LS_BASEURL = "devbridge.ai.baseurl";
 let aiSettingsMemory = null;
 function readAiSettings() {
-  return {
-    provider: aiProvider?.value || "gemini",
+  // Live modal fields win while the modal is open; otherwise stored values.
+  const live = {
+    provider: aiProvider?.value || "",
     apiKey: aiApiKey?.value || "",
     model: aiModel?.value?.trim() || "",
     baseUrl: aiBaseUrl?.value?.trim() || "",
+  };
+  let stored = aiSettingsMemory;
+  try {
+    stored = {
+      provider: localStorage.getItem(LS_PROVIDER) || "",
+      apiKey: localStorage.getItem(LS_APIKEY) || "",
+      model: localStorage.getItem(LS_MODEL) || "",
+      baseUrl: localStorage.getItem(LS_BASEURL) || "",
+    };
+    aiSettingsMemory = stored;
+  } catch {
+    stored = aiSettingsMemory;
+  }
+  return {
+    provider: live.provider || stored?.provider || "gemini",
+    apiKey: live.apiKey || stored?.apiKey || "",
+    model: live.model || stored?.model || "",
+    baseUrl: live.baseUrl || stored?.baseUrl || "",
   };
 }
 function currentAiConfig() {
@@ -82,32 +108,93 @@ function currentAiConfig() {
   if (s.provider === "openai-compatible" && s.baseUrl) cfg.baseUrl = s.baseUrl;
   return cfg;
 }
-async function persistAiSettings() {
+function updateAiSettingsSummary() {
   const s = readAiSettings();
+  if (aiSettingsSummary) {
+    const bits = [`Provider: ${s.provider}`];
+    if (s.model) bits.push(`Model: ${s.model}`);
+    bits.push(s.apiKey ? "Key: ●●●● set" : "Key: agent .env");
+    aiSettingsSummary.textContent = bits.join(" — ") + " — click ⚙️ to change.";
+  }
+}
+function persistAiSettings() {
+  const s = {
+    provider: aiProvider?.value || "gemini",
+    apiKey: aiApiKey?.value || "",
+    model: aiModel?.value?.trim() || "",
+    baseUrl: aiBaseUrl?.value?.trim() || "",
+  };
   aiSettingsMemory = s;
   try {
-    if (chrome?.storage?.session) await chrome.storage.session.set({ [AI_SESSION_KEY]: s });
+    localStorage.setItem(LS_PROVIDER, s.provider);
+    localStorage.setItem(LS_APIKEY, s.apiKey);
+    localStorage.setItem(LS_MODEL, s.model);
+    localStorage.setItem(LS_BASEURL, s.baseUrl);
   } catch {}
+  updateAiSettingsSummary();
 }
-async function restoreAiSettings() {
-  let saved = aiSettingsMemory;
+function restoreAiSettings() {
+  let saved = null;
   try {
-    if (!saved && chrome?.storage?.session) {
-      const got = await chrome.storage.session.get(AI_SESSION_KEY);
-      saved = got?.[AI_SESSION_KEY] || null;
-    }
+    saved = {
+      provider: localStorage.getItem(LS_PROVIDER) || "",
+      apiKey: localStorage.getItem(LS_APIKEY) || "",
+      model: localStorage.getItem(LS_MODEL) || "",
+      baseUrl: localStorage.getItem(LS_BASEURL) || "",
+    };
   } catch {}
-  if (saved) {
+  if (saved && (saved.provider || saved.apiKey || saved.model || saved.baseUrl)) {
+    aiSettingsMemory = saved;
     if (aiProvider && saved.provider) aiProvider.value = saved.provider;
     if (aiApiKey && saved.apiKey) aiApiKey.value = saved.apiKey;
     if (aiModel && saved.model) aiModel.value = saved.model;
     if (aiBaseUrl && saved.baseUrl) aiBaseUrl.value = saved.baseUrl;
+    updateAiSettingsSummary();
+    return true;
   }
+  updateAiSettingsSummary();
+  return false;
 }
 for (const el of [aiProvider, aiApiKey, aiModel, aiBaseUrl]) {
   if (el) el.addEventListener("change", persistAiSettings);
 }
-restoreAiSettings();
+const hasSavedSettings = restoreAiSettings();
+
+// ---- Settings modal open/close/save + first-run onboarding ----
+function openSettingsModal() {
+  if (settingsModal) settingsModal.style.display = "flex";
+}
+function closeSettingsModal() {
+  if (settingsModal) settingsModal.style.display = "none";
+}
+const btnOpenSettings = document.getElementById("btn-open-settings");
+const btnSaveSettings = document.getElementById("btn-save-settings");
+const btnCloseSettings = document.getElementById("btn-close-settings");
+if (btnOpenSettings) btnOpenSettings.addEventListener("click", openSettingsModal);
+if (btnCloseSettings) btnCloseSettings.addEventListener("click", closeSettingsModal);
+if (settingsModal) {
+  settingsModal.addEventListener("click", (e) => {
+    if (e.target === settingsModal) closeSettingsModal();
+  });
+}
+if (btnSaveSettings) {
+  btnSaveSettings.addEventListener("click", () => {
+    persistAiSettings();
+    closeSettingsModal();
+    if (aiExplanation) {
+      aiExplanation.textContent = "✅ AI Settings saved successfully!";
+      setTimeout(() => {
+        if (aiExplanation.textContent.startsWith("✅ AI Settings saved")) aiExplanation.textContent = "";
+      }, 2000);
+    }
+  });
+}
+// First-run: no saved provider/key yet → open the setup modal automatically.
+if (!hasSavedSettings) {
+  try {
+    openSettingsModal();
+  } catch {}
+}
 
 // ---- Component Tree + Checkpoints ----
 async function loadComponentTree() {

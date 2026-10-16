@@ -118,18 +118,11 @@
 
     <!-- Col 3: AI Assistant & Full-Stack X-Ray -->
     <div class="card">
-      <h3>Enterprise AI Quick Fix (BYOK)</h3>
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
-        <select id="ai-provider">
-          <option value="gemini">Gemini</option>
-          <option value="openai">OpenAI</option>
-          <option value="anthropic">Claude</option>
-          <option value="openai-compatible">Ollama</option>
-        </select>
-        <input id="ai-model" placeholder="Model override..." autocomplete="off" />
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">AI Assistant &amp; Triage</h3>
+        <button id="btn-open-settings" class="secondary" style="padding:2px 6px; font-size:10px; margin:0;">⚙️ Settings</button>
       </div>
-      <input id="ai-apikey" type="password" placeholder="API Key (session-only)..." autocomplete="off" />
-      <input id="ai-baseurl" placeholder="Base URL (custom gateway only)..." autocomplete="off" />
+      <div id="ai-settings-summary" style="font-size:10px; color:var(--text-muted);">Provider: Gemini (default) — click ⚙️ to configure BYOK.</div>
       <div style="display: flex; gap: 4px;">
         <button id="btn-ai-fix" class="secondary" style="flex:1;" disabled>Propose AI Fix</button>
         <button id="btn-ai-apply" class="success" style="flex:1;" disabled>Apply AI Patch</button>
@@ -142,6 +135,36 @@
       <h3>Full-Stack X-Ray (Backend Crash)</h3>
       <div id="traces-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
         <div style="font-size: 11px; color: #64748b;">Listening for errors...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal: Enterprise AI provider / BYOK (hidden by default) -->
+  <div id="settings-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.85); z-index:999; justify-content:center; align-items:center;">
+    <div style="background:#1e293b; border:1px solid #334155; border-radius:8px; padding:16px; width:320px; display:flex; flex-direction:column; gap:8px;">
+      <h3 style="margin:0; color:#93c5fd; font-size:12px;">⚙️ DevBridge AI Settings</h3>
+      <div style="font-size:10px; color:var(--text-muted);">Configure your enterprise provider or BYOK credentials. Stored only in this browser.</div>
+
+      <label class="mini" style="font-size:10px; color:var(--text-muted);">AI Provider:</label>
+      <select id="modal-ai-provider">
+        <option value="gemini">Google Gemini</option>
+        <option value="openai">OpenAI (GPT-4o)</option>
+        <option value="anthropic">Anthropic Claude</option>
+        <option value="openai-compatible">Custom Gateway / Ollama</option>
+      </select>
+
+      <label class="mini" style="font-size:10px; color:var(--text-muted);">Model Override:</label>
+      <input id="modal-ai-model" placeholder="e.g. gpt-4o, claude-3-5-sonnet..." autocomplete="off" />
+
+      <label class="mini" style="font-size:10px; color:var(--text-muted);">API Key:</label>
+      <input id="modal-ai-apikey" type="password" placeholder="Enter API Key..." autocomplete="off" />
+
+      <label class="mini" style="font-size:10px; color:var(--text-muted);">Base URL (custom gateway only):</label>
+      <input id="modal-ai-baseurl" placeholder="e.g. http://127.0.0.1:11434/v1" autocomplete="off" />
+
+      <div style="display:flex; gap:6px; margin-top:8px;">
+        <button id="btn-save-settings" class="success" style="flex:1;">Save Settings</button>
+        <button id="btn-close-settings" class="secondary" style="flex:1;">Close</button>
       </div>
     </div>
   </div>
